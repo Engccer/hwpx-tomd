@@ -1,0 +1,38 @@
+# Byte-compiled / optimized
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Distribution / packaging
+build/
+dist/
+*.egg-info/
+.eggs/
+pip-wheel-metadata/
+
+# Test / coverage
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.nox/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Editors / OS
+.vscode/
+.idea/
+*.swp
+*~
+.DS_Store
+Thumbs.db
+
+# 저작물·민감 자료 보호 안전장치
+# 픽스처는 conftest.py가 동적 생성하므로 실제 HWP/HWPX는 repo에 두지 않는다.
+# 로컬 검증용으로 실제 워크시트·고사 원안을 폴더에 복사해도 실수로 커밋되지 않게 막는다.
+*.hwp
+*.hwpx

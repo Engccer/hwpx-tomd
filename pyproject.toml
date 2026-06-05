@@ -1,0 +1,48 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "hwpx-tomd"
+dynamic = ["version"]
+description = "Convert HWPX (Hancom Office) documents to Markdown locally, with no external API. Read-only."
+readme = "README.md"
+requires-python = ">=3.10"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "Hunyong Kim", email = "engccer@gmail.com" }]
+keywords = ["hwpx", "hancom", "hwp", "markdown", "converter", "korean", "document", "ooxml"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Office/Business",
+    "Topic :: Text Processing :: Markup :: Markdown",
+    "Natural Language :: Korean",
+]
+dependencies = ["lxml>=4.9"]
+
+[project.optional-dependencies]
+test = ["pytest>=7.0"]
+
+[project.urls]
+Homepage = "https://github.com/Engccer/hwpx-tomd"
+Repository = "https://github.com/Engccer/hwpx-tomd"
+Issues = "https://github.com/Engccer/hwpx-tomd/issues"
+
+[project.scripts]
+hwpx-tomd = "hwpx_tomd.cli:main"
+
+[tool.hatch.version]
+path = "src/hwpx_tomd/_version.py"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/hwpx_tomd"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
