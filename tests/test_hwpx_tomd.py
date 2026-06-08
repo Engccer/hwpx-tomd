@@ -393,3 +393,21 @@ def test_image_dir_none_keeps_current_behavior(make_hwpx):
     assert result.extracted_images == 0
     assert result.image_map == {}
     assert result.image_count == 1  # 경고용 pic 카운트는 그대로
+
+
+def test_bindata_files_stem_match(make_hwpx):
+    from hwpx_tomd.core import _bindata_files
+    src = make_hwpx(PIC_P, bindata={"image1.jpg": b"x", "image8.wmf": b"y"})
+    import zipfile
+    with zipfile.ZipFile(src) as zf:
+        m = _bindata_files(zf)
+    assert m["image1"] == "BinData/image1.jpg"
+    assert m["image8"] == "BinData/image8.wmf"
+
+
+def test_ocr_eligible():
+    from hwpx_tomd.core import _ocr_eligible
+    assert _ocr_eligible("jpg") is True
+    assert _ocr_eligible("PNG") is True
+    assert _ocr_eligible("wmf") is False
+    assert _ocr_eligible("") is False

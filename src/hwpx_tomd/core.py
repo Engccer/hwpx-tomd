@@ -441,6 +441,29 @@ def count_images(roots) -> int:
     )
 
 
+_RASTER_EXTS = {"jpg", "jpeg", "png", "gif", "bmp", "tiff", "tif", "webp"}
+
+
+def _ocr_eligible(ext: str) -> bool:
+    """확장자가 OCR/Vision으로 읽을 수 있는 래스터 포맷이면 True (wmf/emf 등은 False)."""
+    return ext.lower() in _RASTER_EXTS
+
+
+def _bindata_files(zf) -> dict[str, str]:
+    """zip에서 binaryItemIDRef(=파일 stem) -> BinData zip 경로 매핑.
+
+    실측상 본문 ``binaryItemIDRef="image1"``은 ``BinData/image1.jpg``의 stem과
+    일치하므로 content.hpf 파싱 없이 namelist의 stem 매칭으로 충분하다.
+    """
+    out: dict[str, str] = {}
+    for n in zf.namelist():
+        parts = n.split("/")
+        if len(parts) >= 2 and parts[-2].lower() == "bindata" and parts[-1]:
+            stem = parts[-1].rsplit(".", 1)[0]
+            out[stem] = n
+    return out
+
+
 def _read_section_roots(filepath: PathLike) -> list:
     """HWPX zip에서 ``Contents/sectionN.xml``들을 파싱해 root 리스트를 반환.
 
