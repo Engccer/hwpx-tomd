@@ -497,3 +497,11 @@ def test_cli_image_dir_writes_map(make_hwpx, tmp_path):
     assert (out / "image1.jpg").exists()
     m = json.loads((out / "_image_map.json").read_text(encoding="utf-8"))
     assert "![image](img/image1.jpg)" in m
+
+
+def test_wmf_warning_text(make_hwpx, tmp_path):
+    body = '<hp:p><hp:run><hp:pic><hp:img binaryItemIDRef="image8"/></hp:pic></hp:run></hp:p>'
+    src = make_hwpx(body, bindata={"image8.wmf": b"x"})
+    result = convert(src, image_dir=str(tmp_path / "i"))
+    joined = " ".join(result.warnings)
+    assert "비래스터" in joined and "OCR/Vision 부적합" in joined
