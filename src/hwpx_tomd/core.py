@@ -353,7 +353,7 @@ def render_table_md(tbl, cell_br: bool = False, merge_fill: bool = False) -> str
 
 
 def render_block_lines(
-    para, cell_br: bool = False, merge_fill: bool = False
+    para, cell_br: bool = False, merge_fill: bool = False, image_ctx=None
 ) -> list[str]:
     """최상위 문단을 reading order로 순회하며 라인 리스트를 생성한다.
 
@@ -384,6 +384,19 @@ def render_block_lines(
                     lines.append("")
                     lines.append(md)
                     lines.append("")
+            elif tag == "pic" and image_ctx is not None:
+                idref = None
+                for sub in child.iter():
+                    if localname(sub.tag) == "img":
+                        idref = sub.get("binaryItemIDRef")
+                        break
+                if idref:
+                    ref = image_ctx.ref_for(idref)
+                    if ref:
+                        flush()
+                        lines.append("")
+                        lines.append(ref)
+                        lines.append("")
             elif tag == "p":
                 flush()
                 rec(child)
@@ -464,6 +477,23 @@ def _bindata_files(zf) -> dict[str, str]:
     return out
 
 
+class _ImageCtx:
+    """이미지 참조 삽입용 컨텍스트. render 중 pic을 만나면 참조를 만들고 사용 id를 모은다."""
+
+    def __init__(self, id_to_file: dict[str, str], prefix: str):
+        self.id_to_file = id_to_file   # id -> "BinData/imageN.ext"
+        self.prefix = prefix
+        self.used: dict[str, str] = {}  # id -> "imageN.ext"(basename), 등장 순서 보존
+
+    def ref_for(self, idref: str) -> "str | None":
+        zippath = self.id_to_file.get(idref)
+        if not zippath:
+            return None
+        fname = zippath.split("/")[-1]
+        self.used.setdefault(idref, fname)
+        return f"![image]({self.prefix}{fname})"
+
+
 def _read_section_roots(filepath: PathLike) -> list:
     """HWPX zip에서 ``Contents/sectionN.xml``들을 파싱해 root 리스트를 반환.
 
@@ -505,7 +535,7 @@ def _read_section_roots(filepath: PathLike) -> list:
 
 
 def _render_roots(
-    roots, cell_br: bool, merge_fill: bool = False
+    roots, cell_br: bool, merge_fill: bool = False, image_ctx=None
 ) -> tuple[str, set[str], str]:
     """section root들을 (Markdown 문자열, 원본 단어 집합, 원본 ``<hp:t>`` 텍스트)로 변환.
 
@@ -523,7 +553,8 @@ def _render_roots(
         for child in root:
             if localname(child.tag) == "p":
                 all_lines += render_block_lines(
-                    child, cell_br=cell_br, merge_fill=merge_fill
+                    child, cell_br=cell_br, merge_fill=merge_fill,
+                    image_ctx=image_ctx,
                 )
 
     # 연속 빈 줄 정리
