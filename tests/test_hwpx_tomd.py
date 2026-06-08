@@ -411,3 +411,21 @@ def test_ocr_eligible():
     assert _ocr_eligible("PNG") is True
     assert _ocr_eligible("wmf") is False
     assert _ocr_eligible("") is False
+
+
+def test_image_ref_inserted_reading_order(make_hwpx):
+    """_render_roots에 image_ctx를 주면 pic 위치에 참조가 삽입된다."""
+    import zipfile
+    from hwpx_tomd.core import (
+        _read_section_roots, _render_roots, _bindata_files, _ImageCtx,
+    )
+    src = make_hwpx(p("앞 문단") + PIC_P + p("뒤 문단"),
+                    bindata={"image1.jpg": b"x"})
+    roots = _read_section_roots(src)
+    with zipfile.ZipFile(src) as zf:
+        id_to_file = _bindata_files(zf)
+    ctx = _ImageCtx(id_to_file, "img/")
+    md, _, _ = _render_roots(roots, cell_br=False, image_ctx=ctx)
+    assert "![image](img/image1.jpg)" in md
+    assert ctx.used == {"image1": "image1.jpg"}
+    assert md.index("앞 문단") < md.index("![image]") < md.index("뒤 문단")
