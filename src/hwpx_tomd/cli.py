@@ -13,6 +13,7 @@ recall·마커·이미지 경고를 stderr로 출력한다. 파싱 로직은 일
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 from pathlib import Path
 
@@ -125,9 +126,7 @@ def main(argv: list[str] | None = None) -> int:
         )
 
     if args.image_dir and result.image_map:
-        import json
-        from pathlib import Path as _P
-        map_path = _P(args.image_dir) / "_image_map.json"
+        map_path = Path(args.image_dir) / "_image_map.json"
         map_path.write_text(
             json.dumps(result.image_map, ensure_ascii=False, indent=2),
             encoding="utf-8",

@@ -81,6 +81,25 @@ hwpx-tomd file.hwpx --merge-fill # 표 병합 칸을 같은 값으로 채움
 
 종료 코드: `0` 성공, `1` 일반 오류, `2` 잘못된 인자/파일 없음, `3` 암호화된 HWPX.
 
+## 이미지 추출 (OCR 파이프라인용)
+
+CLI:
+```bash
+hwpx-tomd doc.hwpx --image-dir ./imgs --image-prefix img/
+# md에 ![image](img/imageN) 참조, ./imgs에 이미지 파일 + _image_map.json 생성
+```
+
+라이브러리:
+```python
+from hwpx_tomd import convert
+result = convert("doc.hwpx", image_dir="imgs", image_ref_prefix="img/")
+result.image_map          # docparse inject() 호환 매핑(키=md 참조 문자열)
+result.extracted_images   # 추출된 고유 이미지 수
+```
+
+추출되는 것은 그림 파일 자체이며, 그림 속 텍스트는 OCR(docparse/Upstage) 영역입니다.
+WMF 등 비래스터는 추출하되 image_map에서 ocr_eligible=false로 표시됩니다.
+
 ## 범위
 
 - **In scope (읽기 전용)**: HWPX → Markdown/텍스트, 표 그리드 배치, 병합 칸 채우기 옵션, 글상자 수집, tail 보존, 자가검증(단어 recall · 글자 멀티셋 recall · 마커 보존 가드), 이미지 존재 경고, 암호화 감지·안내.
