@@ -429,3 +429,40 @@ def test_image_ref_inserted_reading_order(make_hwpx):
     assert "![image](img/image1.jpg)" in md
     assert ctx.used == {"image1": "image1.jpg"}
     assert md.index("앞 문단") < md.index("![image]") < md.index("뒤 문단")
+
+
+def test_image_extracted_and_mapped(make_hwpx, tmp_path):
+    src = make_hwpx(PIC_P, bindata={"image1.jpg": b"JPEGDATA"})
+    out = tmp_path / "imgs"
+    result = convert(src, image_dir=str(out))
+    assert (out / "image1.jpg").read_bytes() == b"JPEGDATA"
+    assert result.extracted_images == 1
+    assert "![image](image1.jpg)" in result.markdown
+    assert result.image_map == {
+        "![image](image1.jpg)": {
+            "image_id": "image1", "file": "image1.jpg", "ext": "jpg",
+            "ocr_eligible": True, "ko_alt": None,
+        }
+    }
+
+
+def test_image_prefix_applied(make_hwpx, tmp_path):
+    src = make_hwpx(PIC_P, bindata={"image1.jpg": b"x"})
+    result = convert(src, image_dir=str(tmp_path / "i"), image_ref_prefix="img/")
+    assert "![image](img/image1.jpg)" in result.markdown
+    assert result.image_map["![image](img/image1.jpg)"]["file"] == "img/image1.jpg"
+
+
+def test_duplicate_image_extracted_once(make_hwpx, tmp_path):
+    src = make_hwpx(PIC_P + PIC_P, bindata={"image1.jpg": b"x"})
+    result = convert(src, image_dir=str(tmp_path / "i"))
+    assert result.markdown.count("![image](image1.jpg)") == 2  # 참조 2회
+    assert result.extracted_images == 1                          # 파일 1개
+    assert len(result.image_map) == 1
+
+
+def test_wmf_not_ocr_eligible(make_hwpx, tmp_path):
+    body = '<hp:p><hp:run><hp:pic><hp:img binaryItemIDRef="image8"/></hp:pic></hp:run></hp:p>'
+    src = make_hwpx(body, bindata={"image8.wmf": b"x"})
+    result = convert(src, image_dir=str(tmp_path / "i"))
+    assert result.image_map["![image](image8.wmf)"]["ocr_eligible"] is False

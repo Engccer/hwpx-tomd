@@ -139,7 +139,7 @@ class ConversionResult:
     image_count: int = 0
     char_recall: float = 1.0
     extracted_images: int = 0
-    image_map: dict = field(default_factory=dict)
+    image_map: dict[str, dict[str, object]] = field(default_factory=dict)
 
 
 def localname(tag: str) -> str:
@@ -459,7 +459,7 @@ _RASTER_EXTS = {"jpg", "jpeg", "png", "gif", "bmp", "tiff", "tif", "webp"}
 
 def _ocr_eligible(ext: str) -> bool:
     """확장자가 OCR/Vision으로 읽을 수 있는 래스터 포맷이면 True (wmf/emf 등은 False)."""
-    return ext.lower() in _RASTER_EXTS
+    return ext.lstrip(".").lower() in _RASTER_EXTS
 
 
 def _bindata_files(zf) -> dict[str, str]:
@@ -492,6 +492,43 @@ class _ImageCtx:
         fname = zippath.split("/")[-1]
         self.used.setdefault(idref, fname)
         return f"![image]({self.prefix}{fname})"
+
+
+def _extract_used(filepath: PathLike, ctx: "_ImageCtx", image_dir: str) -> int:
+    """ctx.used의 이미지를 image_dir로 추출한다(고유 파일만). 추출 수를 반환."""
+    import os
+    os.makedirs(image_dir, exist_ok=True)
+    n = 0
+    with zipfile.ZipFile(filepath, "r") as zf:
+        for idref, fname in ctx.used.items():
+            zippath = ctx.id_to_file.get(idref)
+            if not zippath:
+                continue
+            try:
+                data = zf.read(zippath)
+            except KeyError:
+                continue
+            with open(os.path.join(image_dir, fname), "wb") as fh:
+                fh.write(data)
+            n += 1
+    return n
+
+
+def _build_image_map(ctx: "_ImageCtx") -> dict:
+    """ctx.used -> docparse inject() 호환 매핑 dict."""
+    out: dict[str, dict] = {}
+    for idref, fname in ctx.used.items():
+        ext = fname.rsplit(".", 1)[-1] if "." in fname else ""
+        rel = f"{ctx.prefix}{fname}"
+        ref = f"![image]({rel})"
+        out[ref] = {
+            "image_id": idref,
+            "file": rel,
+            "ext": ext,
+            "ocr_eligible": _ocr_eligible(ext),
+            "ko_alt": None,
+        }
+    return out
 
 
 def _read_section_roots(filepath: PathLike) -> list:
@@ -578,6 +615,8 @@ def convert(
     cell_br: bool = False,
     merge_fill: bool = False,
     recall_threshold: float = RECALL_WARN_THRESHOLD,
+    image_dir: "str | None" = None,
+    image_ref_prefix: str = "",
 ) -> ConversionResult:
     """HWPX를 Markdown으로 변환하고 자가검증 결과를 함께 반환한다.
 
@@ -603,20 +642,38 @@ def convert(
             시작 칸과 같은 값으로 채운다. 정보량은 같지만 모든 행이 자족적이 되어
             LLM 입력·행 단위 파싱에 유리하다(기본 False는 GFM 열 정렬 보존을 우선).
         recall_threshold: 이 값 미만이면 경고를 추가한다.
+        image_dir: 이미지를 추출할 디렉터리 경로. 지정하면 BinData에서 사용된
+            이미지 파일을 이 디렉터리에 쓰고 Markdown에 ``![image](...)`` 참조를
+            삽입한다. None(기본)이면 이미지 추출 없이 현행 동작과 동일하다.
+        image_ref_prefix: Markdown 참조와 image_map의 ``file`` 값 앞에 붙는 경로
+            접두사. 예: ``"img/"`` -> ``![image](img/image1.jpg)``. 기본 빈 문자열.
 
     Returns:
         :class:`ConversionResult` (markdown, recall, warnings, image_count,
-        char_recall).
+        char_recall, extracted_images, image_map).
 
     Raises:
         HwpxEncryptedError: 파일이 암호화되어 있을 때.
         HwpxParseError: 올바른 HWPX zip이 아니거나 section XML이 없을 때.
     """
     roots = _read_section_roots(filepath)
+
+    image_ctx = None
+    if image_dir is not None:
+        with zipfile.ZipFile(filepath, "r") as zf:
+            id_to_file = _bindata_files(zf)
+        image_ctx = _ImageCtx(id_to_file, image_ref_prefix)
+
     markdown, gt_words, src_text = _render_roots(
-        roots, cell_br=cell_br, merge_fill=merge_fill
+        roots, cell_br=cell_br, merge_fill=merge_fill, image_ctx=image_ctx
     )
     image_count = count_images(roots)
+
+    extracted_images = 0
+    image_map: dict = {}
+    if image_ctx is not None:
+        extracted_images = _extract_used(filepath, image_ctx, image_dir)
+        image_map = _build_image_map(image_ctx)
 
     warnings: list[str] = []
     if gt_words:
@@ -665,6 +722,8 @@ def convert(
         warnings=warnings,
         image_count=image_count,
         char_recall=char_recall,
+        extracted_images=extracted_images,
+        image_map=image_map,
     )
 
 
