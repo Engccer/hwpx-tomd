@@ -14,11 +14,11 @@
 
 - 사용자 호칭: "헌용 쌤" (영어: "Hunyong")
 - 작성자: 신명중 김헌용 교사(시각장애 중등 영어 교사, 장교조 위원장). 학교·장교조 업무에서 HWPX를 매우 자주 다룬다.
-- 라이선스(예정): MIT
+- 라이선스: MIT
 
-## 현재 상태: 코어 구현·검증 완료 + 두 스킬 마이그레이션 완료
+## 현재 상태: 코어·검증·두 스킬 마이그레이션 완료 + PyPI·GitHub 공개
 
-패키지 코어가 구현·검증되었고(2026-06-05), 첫 git 커밋과 두 소비 스킬 통합까지 마쳤다(2026-06-06). 배경·설계·로드맵 상세는 [`PLAN.md`](PLAN.md) 참조.
+패키지 코어가 구현·검증되었고(2026-06-05), 첫 git 커밋과 두 소비 스킬 통합까지 마쳤다(2026-06-06). PyPI·GitHub(Engccer/hwpx-tomd)에 0.1.0으로 공개하고 기여 안내(`CONTRIBUTING.md`)까지 추가했다(2026-06-08). 배경·설계·로드맵 상세는 [`PLAN.md`](PLAN.md) 참조.
 
 - **완료**: 이름 확정(`hwpx-tomd`, PyPI 가용 확인), src layout 스캐폴드, `core.py`(엔진 이식·라이브러리화), `cli.py`, 테스트 33개(결함 ①②③ 회귀 가드 + recall + 암호화 + 파싱 오류 + CLI + 이미지 경고 + merge_fill + char_recall + 마커 가드), editable 설치, 검증 샘플 10종이 원본 엔진 출력과 글자 단위 동일(IDENTICAL)·recall 100% 확인. 표가 많은 문서까지 동일하여 python-hwpx 표 로직 차용은 불필요로 결론.
 - **Upstage 교차검증(2026-06-06)**: 추가 5종(고사 원안·교육과정·평가계획·체크리스트)을 Upstage 파싱본과 정밀 대조. 내용 동등(체크리스트 100% 일치), 표·객관식 마커는 패키지 우위, 유일한 격차는 이미지 내 텍스트(OCR 영역). 이를 바탕으로 세 개선 반영: (A) `ConversionResult.image_count` + 이미지 존재 경고(self-recall 맹점 보완), (B) recall이 `<hp:t>` 텍스트 기준이라는 한계 문서화, (C) 병합 칸 채우기 옵션 `merge_fill`(라이브러리·`--merge-fill`).
@@ -26,7 +26,7 @@
 - **첫 커밋(2026-06-06)**: `109399e feat: hwpx-tomd 0.1.0 초기 구현`. 13파일/1850줄. `.gitignore`가 `*.hwp`/`*.hwpx` 차단, 저작물 파일 미포함 확인.
 - **hwpx-automation 마이그레이션 완료(2026-06-06, 로드맵 7)**: `hwpx_edit.py`가 to-md 전용 렌더 함수군 8개를 제거하고 `cmd_to_md`를 `from hwpx_tomd import convert` 호출 래퍼로 교체(편집 명령 잔류). 출력 byte-IDENTICAL 검증, `--merge-fill` 추가. 변환 엔진이 이제 이 패키지에만 존재(분기 제거).
 - **docparse 마이그레이션 완료(2026-06-06, 로드맵 8)**: `parsers/hwpx_local_parse.py`(출력 `_hwpxlocal.md`)가 이 패키지를 호출. HWPX 티어가 hwpx_local 우선 + Upstage 폴백으로 전환.
-- **대기**: 공개(9, TestPyPI/PyPI), 멀티 디바이스 배포(10).
+- **완료**: 공개(9, PyPI·GitHub Engccer/hwpx-tomd 0.1.0 게시 + `CONTRIBUTING.md` 기여 경로 명문화, 2026-06-08). **대기**: 멀티 디바이스 배포(10, 맥미니 등은 git 클론 + `pip install -U hwpx-tomd`로 전환).
 - 의존성은 `lxml`만 요구하며 설치 환경의 lxml 6.x와 정상 동작(`python-hwpx`의 `lxml<6` 핀 회피 확인).
 - 사전 조사 결론: PyPI의 기존 패키지(hwpx2md, python-hwpx, hwp2md, pyhwpxlib 등) 중 세 결함을 동시에 해결하는 것이 없어 자체 엔진 추출이 정답으로 재확인됨.
 
