@@ -741,7 +741,12 @@ def convert(
 
 
 def to_markdown(
-    filepath: PathLike, *, cell_br: bool = False, merge_fill: bool = False
+    filepath: PathLike,
+    *,
+    cell_br: bool = False,
+    merge_fill: bool = False,
+    image_dir: "str | None" = None,
+    image_ref_prefix: str = "",
 ) -> str:
     """HWPX를 Markdown 문자열로 변환한다(가장 간단한 진입점).
 
@@ -751,9 +756,19 @@ def to_markdown(
         filepath: HWPX 파일 경로(str 또는 Path).
         cell_br: True이면 표 셀 내부 문단을 ``<br>``로 구분한다.
         merge_fill: True이면 표 병합 칸을 시작 칸 값으로 채운다(:func:`convert` 참조).
+        image_dir: 이미지를 추출할 디렉터리 경로. 지정하면 BinData에서 사용된
+            이미지 파일을 이 디렉터리에 쓰고 Markdown에 ``![image](...)`` 참조를
+            삽입한다. None(기본)이면 이미지 추출 없이 현행 동작과 동일하다.
+        image_ref_prefix: Markdown 참조 경로 접두사(:func:`convert` 참조).
 
     Raises:
         HwpxEncryptedError: 파일이 암호화되어 있을 때.
         HwpxParseError: 올바른 HWPX zip이 아니거나 section XML이 없을 때.
     """
-    return convert(filepath, cell_br=cell_br, merge_fill=merge_fill).markdown
+    return convert(
+        filepath,
+        cell_br=cell_br,
+        merge_fill=merge_fill,
+        image_dir=image_dir,
+        image_ref_prefix=image_ref_prefix,
+    ).markdown
