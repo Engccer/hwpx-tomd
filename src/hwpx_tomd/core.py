@@ -710,11 +710,24 @@ def convert(
         )
 
     if image_count:
-        warnings.append(
-            f"본문에 이미지 {image_count}개가 있습니다. 이미지 안의 텍스트"
-            "(제목·도표·캡션 등)는 추출되지 않으므로, 그래픽에 글자가 있으면 "
-            "누락될 수 있습니다(self-recall은 XML 텍스트 기준이라 이를 감지하지 못함)."
-        )
+        if image_dir is not None:
+            non_ocr = sum(
+                1 for v in image_map.values() if not v["ocr_eligible"]
+            )
+            msg = (
+                f"본문 이미지 {image_count}개 배치(고유 {extracted_images}개) "
+                f"추출 완료. 그림 속 텍스트는 OCR 필요(이 패키지 범위 밖)."
+            )
+            if non_ocr:
+                msg += f" 단 {non_ocr}개는 비래스터(WMF 등)라 OCR/Vision 부적합, 변환 필요."
+            warnings.append(msg)
+        else:
+            warnings.append(
+                f"본문에 이미지 {image_count}개가 있습니다. 이미지 안의 텍스트"
+                "(제목·도표·캡션 등)는 추출되지 않으므로, 그래픽에 글자가 있으면 "
+                "누락될 수 있습니다(self-recall은 XML 텍스트 기준이라 이를 감지하지 못함). "
+                "이미지 파일이 필요하면 convert(image_dir=...)를 사용하세요."
+            )
 
     return ConversionResult(
         markdown=markdown,
