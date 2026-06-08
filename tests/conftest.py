@@ -51,6 +51,7 @@ def make_hwpx(tmp_path):
         body_xml: ``<hs:sec>`` 안에 들어갈 본문 XML 조각.
         name: 생성할 파일 이름.
         encrypted: True이면 manifest에 encryption-data를 넣어 암호화로 위장한다.
+        bindata: {파일명: bytes} 매핑. 각 항목을 BinData/<파일명>으로 zip에 기록(이미지 추출 테스트용).
 
     Returns:
         생성된 .hwpx 파일의 :class:`pathlib.Path`.

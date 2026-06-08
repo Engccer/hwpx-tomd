@@ -20,6 +20,7 @@ CLI 출력·종료 코드 변환은 :mod:`hwpx_tomd.cli`가 담당한다.
 
 from __future__ import annotations
 
+import os
 import re
 import zipfile
 from collections import Counter
@@ -496,7 +497,6 @@ class _ImageCtx:
 
 def _extract_used(filepath: PathLike, ctx: "_ImageCtx", image_dir: str) -> int:
     """ctx.used의 이미지를 image_dir로 추출한다(고유 파일만). 추출 수를 반환."""
-    import os
     os.makedirs(image_dir, exist_ok=True)
     n = 0
     with zipfile.ZipFile(filepath, "r") as zf:
@@ -514,7 +514,7 @@ def _extract_used(filepath: PathLike, ctx: "_ImageCtx", image_dir: str) -> int:
     return n
 
 
-def _build_image_map(ctx: "_ImageCtx") -> dict:
+def _build_image_map(ctx: "_ImageCtx") -> dict[str, dict[str, object]]:
     """ctx.used -> docparse inject() 호환 매핑 dict."""
     out: dict[str, dict] = {}
     for idref, fname in ctx.used.items():
