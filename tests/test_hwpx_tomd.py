@@ -466,3 +466,16 @@ def test_wmf_not_ocr_eligible(make_hwpx, tmp_path):
     src = make_hwpx(body, bindata={"image8.wmf": b"x"})
     result = convert(src, image_dir=str(tmp_path / "i"))
     assert result.image_map["![image](image8.wmf)"]["ocr_eligible"] is False
+
+
+def test_image_warning_mentions_extracted(make_hwpx, tmp_path):
+    src = make_hwpx(PIC_P + PIC_P, bindata={"image1.jpg": b"x"})
+    result = convert(src, image_dir=str(tmp_path / "i"))
+    joined = " ".join(result.warnings)
+    assert "추출" in joined and "OCR" in joined  # 추출 완료 + OCR 필요 안내
+
+
+def test_image_warning_unchanged_without_dir(make_hwpx):
+    src = make_hwpx(PIC_P, bindata={"image1.jpg": b"x"})
+    result = convert(src)
+    assert any("이미지 1개" in w for w in result.warnings)
