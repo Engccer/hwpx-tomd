@@ -479,3 +479,21 @@ def test_image_warning_unchanged_without_dir(make_hwpx):
     src = make_hwpx(PIC_P, bindata={"image1.jpg": b"x"})
     result = convert(src)
     assert any("이미지 1개" in w for w in result.warnings)
+
+
+def test_to_markdown_passes_image_dir(make_hwpx, tmp_path):
+    src = make_hwpx(PIC_P, bindata={"image1.jpg": b"x"})
+    md = to_markdown(src, image_dir=str(tmp_path / "i"))
+    assert "![image](image1.jpg)" in md
+    assert (tmp_path / "i" / "image1.jpg").exists()
+
+
+def test_cli_image_dir_writes_map(make_hwpx, tmp_path):
+    import json
+    src = make_hwpx(PIC_P, bindata={"image1.jpg": b"x"})
+    out = tmp_path / "imgs"
+    rc = main([str(src), "--stdout", "--image-dir", str(out), "--image-prefix", "img/"])
+    assert rc == 0
+    assert (out / "image1.jpg").exists()
+    m = json.loads((out / "_image_map.json").read_text(encoding="utf-8"))
+    assert "![image](img/image1.jpg)" in m

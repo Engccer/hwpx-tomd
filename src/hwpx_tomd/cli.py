@@ -57,6 +57,16 @@ def build_parser() -> argparse.ArgumentParser:
         "(행 단위 파싱·LLM 입력용; 기본은 GFM 열 정렬 보존)",
     )
     parser.add_argument(
+        "--image-dir",
+        help="본문 이미지를 추출할 폴더. 지정 시 md에 ![image](...) 참조와 "
+        "<image-dir>/_image_map.json(매핑) 생성. 미지정 시 이미지 생략(현행)",
+    )
+    parser.add_argument(
+        "--image-prefix",
+        default="",
+        help="md 이미지 참조 경로 접두(예: img/). 파일은 --image-dir에 평면 저장",
+    )
+    parser.add_argument(
         "-q",
         "--quiet",
         action="store_true",
@@ -79,7 +89,13 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     try:
-        result = convert(in_path, cell_br=args.cell_br, merge_fill=args.merge_fill)
+        result = convert(
+            in_path,
+            cell_br=args.cell_br,
+            merge_fill=args.merge_fill,
+            image_dir=args.image_dir,
+            image_ref_prefix=args.image_prefix,
+        )
     except HwpxEncryptedError as exc:
         print(f"오류: {exc}", file=sys.stderr)
         return 3
@@ -107,6 +123,21 @@ def main(argv: list[str] | None = None) -> int:
             f"자가검증 recall: 단어 {result.recall:.1%} · 글자 {result.char_recall:.1%}",
             file=info_stream,
         )
+
+    if args.image_dir and result.image_map:
+        import json
+        from pathlib import Path as _P
+        map_path = _P(args.image_dir) / "_image_map.json"
+        map_path.write_text(
+            json.dumps(result.image_map, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+        if not args.quiet:
+            print(
+                f"이미지 {result.extracted_images}개 추출 → {args.image_dir} "
+                f"(매핑: {map_path})",
+                file=info_stream,
+            )
 
     for warning in result.warnings:
         print(f"경고: {warning}", file=sys.stderr)
