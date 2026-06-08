@@ -128,6 +128,9 @@ class ConversionResult:
             누락되었거나, 본문에 이미지가 있을 때 등 사용자에게 알릴 경고 목록.
         image_count: 본문에 배치된 그림(``<hp:pic>``) 개수. >0이면 이미지 내
             텍스트가 누락되었을 수 있음을 알리는 경고가 :attr:`warnings`에 담긴다.
+        extracted_images: image_dir 지정 시 실제 추출된 고유 이미지 파일 수(미지정 0).
+        image_map: docparse inject() 호환 매핑. 키는 md 참조 문자열,
+            값은 {image_id, file, ext, ocr_eligible, ko_alt}. 미지정 시 빈 dict.
     """
 
     markdown: str
@@ -135,6 +138,8 @@ class ConversionResult:
     warnings: list[str] = field(default_factory=list)
     image_count: int = 0
     char_recall: float = 1.0
+    extracted_images: int = 0
+    image_map: dict = field(default_factory=dict)
 
 
 def localname(tag: str) -> str:

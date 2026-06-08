@@ -56,7 +56,7 @@ def make_hwpx(tmp_path):
         생성된 .hwpx 파일의 :class:`pathlib.Path`.
     """
 
-    def _make(body_xml="", *, name="doc.hwpx", encrypted=False):
+    def _make(body_xml="", *, name="doc.hwpx", encrypted=False, bindata=None):
         path = tmp_path / name
         section_xml = _SEC_HEADER + body_xml + _SEC_FOOTER
         manifest = _ENCRYPTED_MANIFEST if encrypted else _PLAIN_MANIFEST
@@ -64,6 +64,8 @@ def make_hwpx(tmp_path):
             zf.writestr("mimetype", "application/hwp+zip")
             zf.writestr("META-INF/manifest.xml", manifest)
             zf.writestr("Contents/section0.xml", section_xml)
+            for fname, data in (bindata or {}).items():
+                zf.writestr(f"BinData/{fname}", data)
         return path
 
     return _make

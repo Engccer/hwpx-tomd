@@ -380,3 +380,16 @@ def test_cli_encrypted_exit_code(make_hwpx, capsys):
     code = main([str(path)])
     assert code == 3
     assert "암호화" in capsys.readouterr().err
+
+
+# --------------------------------------------------------------------------
+# 이미지 추출
+# --------------------------------------------------------------------------
+def test_image_dir_none_keeps_current_behavior(make_hwpx):
+    """image_dir 미지정 시 현행 동작 불변: 참조 없음, 추출 0, 맵 빈 dict, 경고 카운트 유지."""
+    src = make_hwpx(PIC_P, bindata={"image1.jpg": b"JPEGDATA"})
+    result = convert(src)
+    assert "![image]" not in result.markdown
+    assert result.extracted_images == 0
+    assert result.image_map == {}
+    assert result.image_count == 1  # 경고용 pic 카운트는 그대로
