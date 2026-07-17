@@ -39,3 +39,9 @@ Thumbs.db
 
 # uv 락파일 (라이브러리는 버전 범위로 테스트하므로 락파일 미커밋)
 uv.lock
+
+# 내부 개발 문서 (공개 배포 제외)
+CLAUDE.md
+AGENTS.md
+PLAN.md
+docs/superpowers/
