@@ -2,6 +2,11 @@
 
 이 프로젝트의 주요 변경 사항을 기록합니다. 형식은 [Keep a Changelog](https://keepachangelog.com/ko/1.1.0/)를 따르고, 버전은 [Semantic Versioning](https://semver.org/lang/ko/)을 따릅니다.
 
+## [0.2.1] - 2026-08-20
+
+### Fixed
+- hwp2hwpx 변환본의 section XML에 남은 XML 1.0 불법 제어문자(하이퍼링크 `Command` 값의 NUL 패딩 등)로 파싱이 중단되던 문제. 첫 파싱이 실패하면 해당 바이트만 제거하고 한 번 더 시도하며, 제거가 일어나면 경고를 남긴다. 탭·개행·복귀는 보존하고, 제거해도 파싱되지 않는 손상은 종전대로 `HwpxParseError` (#1)
+
 ## [0.2.0] - 2026-06-09
 
 ### Added
@@ -23,5 +28,6 @@
 - 이미지 포함 문서에 대한 경고 출력
 - 라이브러리 API(`to_markdown`, `convert`)와 CLI(`hwpx-tomd`)
 
+[0.2.1]: https://github.com/Engccer/hwpx-tomd/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/Engccer/hwpx-tomd/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/Engccer/hwpx-tomd/releases/tag/v0.1.0

@@ -55,6 +55,11 @@ NS = {
     "config": "urn:oasis:names:tc:opendocument:xmlns:config:1.0",
 }
 
+# XML 1.0 Char 프로덕션에서 배제된 제어문자(탭 0x09·개행 0x0A·복귀 0x0D 제외).
+# hwp2hwpx 변환본이 하이퍼링크 Command 값에 NUL 패딩을 남기는 사례가 있어,
+# 파싱 실패 시 이 바이트만 제거하고 재시도한다.
+_ILLEGAL_XML_BYTES = re.compile(rb"[\x00-\x08\x0B\x0C\x0E-\x1F]")
+
 ENCRYPTION_HINT = (
     "이 HWPX 파일은 암호화되어 있습니다 (AES-256-CBC).\n"
     "XML 직접 파싱으로 처리할 수 없으므로 한컴 COM으로 암호를 먼저 제거해야 합니다.\n"
@@ -533,12 +538,23 @@ def _build_image_map(ctx: "_ImageCtx") -> dict[str, dict[str, object]]:
     return out
 
 
-def _read_section_roots(filepath: PathLike) -> list:
+def _read_section_roots(filepath: PathLike) -> "tuple[list, dict[str, int]]":
     """HWPX zip에서 ``Contents/sectionN.xml``들을 파싱해 root 리스트를 반환.
+
+    hwp2hwpx 변환본은 하이퍼링크 필드의 ``<hp:stringParam name="Command">`` 값에
+    HWP 바이너리의 NUL 패딩을 그대로 써 넣는 일이 있다. NUL을 비롯한
+    :data:`_ILLEGAL_XML_BYTES` 대상 문자는 XML 1.0에서 이스케이프로도 표현할 수
+    없어 lxml이 그 지점에서 파싱을 중단한다. 첫 파싱이 실패하면 그 바이트만
+    제거하고 한 번 더 시도한다(정상 파일에는 비용이 들지 않는 실패 시 경로).
+
+    Returns:
+        (root 리스트, {section 파일명: 제거한 불법 바이트 수}) 튜플. 두 번째 값은
+        제거가 실제로 일어난 section만 담으며 경고 생성에 쓰인다.
 
     Raises:
         HwpxEncryptedError: 파일이 암호화되어 있을 때.
-        HwpxParseError: 올바른 zip이 아니거나 section XML이 없을 때.
+        HwpxParseError: 올바른 zip이 아니거나 section XML이 없을 때, 또는
+            불법 문자를 제거하고도 파싱되지 않을 때.
     """
     if is_encrypted_hwpx(filepath):
         raise HwpxEncryptedError(ENCRYPTION_HINT)
@@ -556,17 +572,41 @@ def _read_section_roots(filepath: PathLike) -> list:
                     "올바른 HWPX 파일인지 확인하세요."
                 )
             roots = []
+            sanitized: dict[str, int] = {}
             for sf in section_files:
+                raw = zf.read(sf)
                 try:
-                    roots.append(etree.fromstring(zf.read(sf)))
+                    roots.append(etree.fromstring(raw))
+                    continue
                 except etree.XMLSyntaxError as exc:
-                    # zip은 정상이나 내부 section XML이 손상된 경우. lxml 예외가
-                    # 그대로 새어 나가지 않도록 HwpxParseError로 감싼다(모든 파싱
-                    # 실패는 HwpxError 한 계층으로 잡힌다는 계약 유지).
-                    raise HwpxParseError(
-                        f"section XML 파싱에 실패했습니다 ({sf}): {exc}"
-                    ) from exc
-            return roots
+                    first_exc = exc
+
+                # 불법 제어문자만 제거해 재시도. 대상 바이트는 XML 1.0 Char
+                # 프로덕션에서 원천 배제된 코드포인트라 텍스트로서 의미가 없고,
+                # UTF-8 다바이트 시퀀스의 구성 바이트(0x80~)와 겹치지 않으므로
+                # 바이트 단위 제거가 안전하다(탭·개행·복귀는 합법이라 보존).
+                cleaned = _ILLEGAL_XML_BYTES.sub(b"", raw)
+                if cleaned != raw:
+                    try:
+                        roots.append(etree.fromstring(cleaned))
+                        sanitized[sf] = len(raw) - len(cleaned)
+                        continue
+                    except etree.XMLSyntaxError as retry_exc:
+                        # 제어문자 말고 다른 손상이 남은 경우. 첫 예외는 제거된
+                        # 문자 위치를 가리켜 오도하므로 재시도 예외를 보고한다.
+                        raise HwpxParseError(
+                            f"section XML 파싱에 실패했습니다 ({sf}): XML 1.0 불법 "
+                            f"제어문자를 제거하고 재시도했으나 여전히 손상되어 "
+                            f"있습니다: {retry_exc}"
+                        ) from retry_exc
+
+                # zip은 정상이나 내부 section XML이 손상된 경우. lxml 예외가
+                # 그대로 새어 나가지 않도록 HwpxParseError로 감싼다(모든 파싱
+                # 실패는 HwpxError 한 계층으로 잡힌다는 계약 유지).
+                raise HwpxParseError(
+                    f"section XML 파싱에 실패했습니다 ({sf}): {first_exc}"
+                ) from first_exc
+            return roots, sanitized
     except zipfile.BadZipFile as exc:
         raise HwpxParseError(
             f"올바른 HWPX(zip) 파일이 아닙니다: {filepath}"
@@ -658,7 +698,7 @@ def convert(
         HwpxEncryptedError: 파일이 암호화되어 있을 때.
         HwpxParseError: 올바른 HWPX zip이 아니거나 section XML이 없을 때.
     """
-    roots = _read_section_roots(filepath)
+    roots, sanitized = _read_section_roots(filepath)
 
     image_ctx = None
     if image_dir is not None:
@@ -678,6 +718,13 @@ def convert(
         image_map = _build_image_map(image_ctx)
 
     warnings: list[str] = []
+    if sanitized:
+        detail = ", ".join(f"{sf} {n}바이트" for sf, n in sorted(sanitized.items()))
+        warnings.append(
+            f"XML 1.0에서 허용되지 않는 제어문자를 제거하고 파싱했습니다({detail}). "
+            "hwp2hwpx 변환본의 하이퍼링크 필드에 남은 NUL 패딩 등이 원인이며, "
+            "제거된 문자는 텍스트로서 의미가 없어 본문 손실은 없습니다."
+        )
     if gt_words:
         out_words = _words(markdown)
         recall = len(gt_words & out_words) / len(gt_words)

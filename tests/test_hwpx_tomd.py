@@ -421,7 +421,7 @@ def test_image_ref_inserted_reading_order(make_hwpx):
     )
     src = make_hwpx(p("앞 문단") + PIC_P + p("뒤 문단"),
                     bindata={"image1.jpg": b"x"})
-    roots = _read_section_roots(src)
+    roots, _ = _read_section_roots(src)
     with zipfile.ZipFile(src) as zf:
         id_to_file = _bindata_files(zf)
     ctx = _ImageCtx(id_to_file, "img/")
@@ -505,3 +505,73 @@ def test_wmf_warning_text(make_hwpx, tmp_path):
     result = convert(src, image_dir=str(tmp_path / "i"))
     joined = " ".join(result.warnings)
     assert "비래스터" in joined and "OCR/Vision 부적합" in joined
+
+
+# --------------------------------------------------------------------------
+# XML 1.0 불법 제어문자 방어 (hwp2hwpx 변환본, 이슈 #1)
+# --------------------------------------------------------------------------
+# hwp2hwpx-1.0.0.jar가 HWP 하이퍼링크 필드의 Command 문자열을 NUL 패딩째로
+# XML에 써 넣어, lxml이 "Premature end of data"로 파싱을 중단하는 사례.
+NUL_FIELD = (
+    '<hp:fieldBegin><hp:parameters>'
+    '<hp:stringParam name="Command" xml:space="preserve">'
+    "http://example.com" + "\x00" * 32 + "</hp:stringParam>"
+    "</hp:parameters></hp:fieldBegin>"
+)
+
+
+def test_nul_bytes_in_section_xml_parsed(make_hwpx):
+    """NUL(0x00)이 섞인 section XML도 sanitize 후 정상 변환된다."""
+    src = make_hwpx(p("앞 문단") + NUL_FIELD + p("뒤 문단"))
+    result = convert(src)
+    assert "앞 문단" in result.markdown
+    assert "뒤 문단" in result.markdown
+    assert "\x00" not in result.markdown
+
+
+def test_nul_bytes_warning_emitted(make_hwpx):
+    """제어문자를 실제로 제거했으면 경고 한 줄을 남긴다(조용한 수정 방지)."""
+    src = make_hwpx(p("본문") + NUL_FIELD)
+    joined = " ".join(convert(src).warnings)
+    assert "제어문자" in joined and "Contents/section0.xml" in joined
+
+
+def test_legal_whitespace_preserved(make_hwpx):
+    """탭·개행은 XML 1.0 합법이라 제거 대상이 아니다. sanitize를 거친 문서가
+    같은 본문의 정상 문서와 글자 단위로 같은 결과를 내는지로 확인한다."""
+    body = p("앞\t중\n간\r뒤") + p("다음 줄")
+    clean = make_hwpx(body, name="clean.hwpx")
+    dirty = make_hwpx(body + NUL_FIELD, name="dirty.hwpx")
+    assert convert(dirty).markdown == convert(clean).markdown
+
+
+def test_broken_xml_still_raises_after_sanitize(tmp_path):
+    """제어문자 제거로도 살릴 수 없는 손상은 여전히 HwpxParseError."""
+    path = tmp_path / "broken_nul.hwpx"
+    with zipfile.ZipFile(path, "w") as zf:
+        zf.writestr("mimetype", "application/hwp+zip")
+        zf.writestr("Contents/section0.xml", "<hs:sec><hp:p>\x00<unclosed")
+    with pytest.raises(HwpxParseError) as exc:
+        to_markdown(path)
+    # 첫 예외(제어문자 위치)가 아니라 재시도 예외를 보고해야 진단이 정확하다.
+    assert "제어문자를 제거하고 재시도" in str(exc.value)
+
+
+def test_sanitize_warning_lists_each_section(tmp_path):
+    """section이 여럿이면 제거가 일어난 section을 모두 경고에 나열한다."""
+    path = tmp_path / "multi.hwpx"
+    header = (
+        '<?xml version="1.0" encoding="UTF-8"?>'
+        '<hs:sec xmlns:hp="http://www.hancom.co.kr/hwpml/2011/paragraph" '
+        'xmlns:hs="http://www.hancom.co.kr/hwpml/2011/section">'
+    )
+    with zipfile.ZipFile(path, "w") as zf:
+        zf.writestr("mimetype", "application/hwp+zip")
+        for i, text in enumerate(["첫 장", "둘째 장"]):
+            zf.writestr(
+                f"Contents/section{i}.xml", header + p(text) + NUL_FIELD + "</hs:sec>"
+            )
+    result = convert(path)
+    assert "첫 장" in result.markdown and "둘째 장" in result.markdown
+    warn = next(w for w in result.warnings if "제어문자" in w)
+    assert "Contents/section0.xml" in warn and "Contents/section1.xml" in warn
