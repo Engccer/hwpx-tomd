@@ -244,9 +244,11 @@ def render_cell_lines(cell) -> list[str]:
             elif tag == "t":
                 buf.append(t_full_text(child))
             elif tag == "tbl":
-                for t in child.iter():
-                    if localname(t.tag) == "t":
-                        buf.append(t_full_text(t))
+                # 중첩표: 셀·문단 경계를 지키며 평탄화한다(문단마다 한 줄). 모든 <hp:t>를
+                # 한 버퍼에 몰아넣으면 셀 경계가 사라져 「학습지도생활지도와」처럼 붙는다.
+                flush()
+                rec(child)
+                flush()
             else:
                 rec(child)
 

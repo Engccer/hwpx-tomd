@@ -615,3 +615,29 @@ def test_multi_run_cell_joins_without_inserted_space(make_hwpx):
     """표 셀 안의 다중 run도 동일하게 원문 공백만 유지한다."""
     result = convert(make_hwpx(MULTI_RUN_CELL))
     assert "아침자습지도 및 조례, 독서지도" in result.markdown
+
+
+# 결함 ⑤: 셀 안의 중첩표를 평탄화할 때 셀 경계가 사라져 단어가 붙는다.
+NESTED_TBL_CELL = (
+    "<hp:p><hp:run><hp:tbl>"
+    "<hp:tr><hp:tc>"
+    '<hp:cellAddr colAddr="0" rowAddr="0"/><hp:cellSpan colSpan="1" rowSpan="1"/>'
+    "<hp:subList>"
+    "<hp:p><hp:run><hp:t>수업과 학습지도</hp:t></hp:run></hp:p>"
+    "<hp:p><hp:run><hp:tbl><hp:tr>"
+    '<hp:tc><hp:cellAddr colAddr="0" rowAddr="0"/><hp:cellSpan colSpan="1" rowSpan="1"/>'
+    "<hp:subList><hp:p><hp:run><hp:t>생활지도와</hp:t></hp:run></hp:p></hp:subList></hp:tc>"
+    '<hp:tc><hp:cellAddr colAddr="1" rowAddr="0"/><hp:cellSpan colSpan="1" rowSpan="1"/>'
+    "<hp:subList><hp:p><hp:run><hp:t>학급경영</hp:t></hp:run></hp:p></hp:subList></hp:tc>"
+    "</hp:tr></hp:tbl></hp:run></hp:p>"
+    "</hp:subList>"
+    "</hp:tc></hp:tr>"
+    "</hp:tbl></hp:run></hp:p>"
+)
+
+
+def test_nested_table_in_cell_keeps_paragraph_boundaries(make_hwpx):
+    """중첩표의 각 셀 문단은 별도 조각으로 나뉘어야 한다(단어 접합 금지)."""
+    result = convert(make_hwpx(NESTED_TBL_CELL), cell_br=True)
+    assert "수업과 학습지도<br>생활지도와<br>학급경영" in result.markdown
+    assert "학습지도생활지도와" not in result.markdown
