@@ -641,3 +641,27 @@ def test_nested_table_in_cell_keeps_paragraph_boundaries(make_hwpx):
     result = convert(make_hwpx(NESTED_TBL_CELL), cell_br=True)
     assert "수업과 학습지도<br>생활지도와<br>학급경영" in result.markdown
     assert "학습지도생활지도와" not in result.markdown
+
+
+# 결함 ⑥: 표·그림의 <hp:caption>(「<표 Ⅰ-1> …」)이 통째로 빠졌다. 캡션은 본문이며
+# 단어 recall은 목차에 같은 문구가 있으면 손실을 못 잡는다.
+def _tbl_with_caption(side):
+    return (
+        "<hp:p><hp:run><hp:tbl>"
+        f'<hp:caption side="{side}"><hp:subList>'
+        "<hp:p><hp:run><hp:t>&lt;표 1&gt; 현황</hp:t></hp:run></hp:p>"
+        "</hp:subList></hp:caption>"
+        "<hp:tr>" + tc(0, 0, "값") + "</hp:tr>"
+        "</hp:tbl></hp:run></hp:p>"
+    )
+
+
+def test_table_caption_bottom_rendered_after_table(make_hwpx):
+    md = convert(make_hwpx(_tbl_with_caption("BOTTOM"))).markdown
+    assert "<표 1> 현황" in md
+    assert md.index("| 값 |") < md.index("<표 1> 현황")
+
+
+def test_table_caption_top_rendered_before_table(make_hwpx):
+    md = convert(make_hwpx(_tbl_with_caption("TOP"))).markdown
+    assert md.index("<표 1> 현황") < md.index("| 값 |")

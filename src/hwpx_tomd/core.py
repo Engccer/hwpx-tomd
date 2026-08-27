@@ -382,16 +382,28 @@ def render_block_lines(
                 lines.append(s)
             buf.clear()
 
+    def caption_of(obj):
+        """표·그림 개체의 <hp:caption>(있으면) → (side, 캡션 줄 목록). 캡션은 본문이다."""
+        for c in obj:
+            if localname(c.tag) == "caption":
+                return (c.get("side") or "BOTTOM").upper(), render_cell_lines(c)
+        return None, []
+
     def rec(node):
         for child in node:
             tag = localname(child.tag)
             if tag == "tbl":
                 flush()
                 md = render_table_md(child, cell_br=cell_br, merge_fill=merge_fill)
+                side, caps = caption_of(child)
+                if side == "TOP":
+                    lines.extend(caps)
                 if md:
                     lines.append("")
                     lines.append(md)
                     lines.append("")
+                if side and side != "TOP":
+                    lines.extend(caps)
             elif tag == "pic" and image_ctx is not None:
                 idref = None
                 for sub in child.iter():
@@ -405,6 +417,10 @@ def render_block_lines(
                         lines.append("")
                         lines.append(ref)
                         lines.append("")
+                _, caps = caption_of(child)
+                if caps:
+                    flush()
+                    lines.extend(caps)
             elif tag == "p":
                 flush()
                 rec(child)
