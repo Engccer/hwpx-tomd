@@ -229,7 +229,7 @@ def render_cell_lines(cell) -> list[str]:
 
     def flush():
         if buf:
-            s = " ".join(" ".join(x for x in buf if x).split())
+            s = " ".join("".join(x for x in buf if x).split())
             if s:
                 lines.append(s)
             buf.clear()
@@ -375,7 +375,7 @@ def render_block_lines(
 
     def flush():
         if buf:
-            s = " ".join(" ".join(x for x in buf if x).split())
+            s = " ".join("".join(x for x in buf if x).split())
             if s:
                 lines.append(s)
             buf.clear()

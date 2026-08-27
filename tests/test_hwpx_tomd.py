@@ -575,3 +575,43 @@ def test_sanitize_warning_lists_each_section(tmp_path):
     assert "첫 장" in result.markdown and "둘째 장" in result.markdown
     warn = next(w for w in result.warnings if "제어문자" in w)
     assert "Contents/section0.xml" in warn and "Contents/section1.xml" in warn
+
+
+# --------------------------------------------------------------------------
+# 결함 ④: 한 문단이 서식(charPr)마다 여러 <hp:run>으로 갈릴 때 run 경계에
+# 공백이 끼어 "내용은 파란색으로"가 "내용 은 파란색 으로"로 깨졌다.
+# --------------------------------------------------------------------------
+MULTI_RUN_P = (
+    "<hp:p>"
+    '<hp:run charPrIDRef="1"><hp:t>수정된 내용</hp:t></hp:run>'
+    '<hp:run charPrIDRef="2"><hp:t>은 </hp:t></hp:run>'
+    '<hp:run charPrIDRef="3"><hp:t>파란색</hp:t></hp:run>'
+    '<hp:run charPrIDRef="2"><hp:t>으로 표시하였습니다.</hp:t></hp:run>'
+    "</hp:p>"
+)
+
+MULTI_RUN_CELL = (
+    "<hp:p><hp:run><hp:tbl>"
+    "<hp:tr><hp:tc>"
+    '<hp:cellAddr colAddr="0" rowAddr="0"/><hp:cellSpan colSpan="1" rowSpan="1"/>'
+    "<hp:subList><hp:p>"
+    '<hp:run charPrIDRef="1"><hp:t>아침자습지도 및</hp:t></hp:run>'
+    '<hp:run charPrIDRef="2"><hp:t> 조례,</hp:t></hp:run>'
+    '<hp:run charPrIDRef="1"><hp:t> 독서지도</hp:t></hp:run>'
+    "</hp:p></hp:subList>"
+    "</hp:tc></hp:tr>"
+    "</hp:tbl></hp:run></hp:p>"
+)
+
+
+def test_multi_run_paragraph_joins_without_inserted_space(make_hwpx):
+    """서식 경계로 나뉜 run들은 원문 그대로 이어 붙여야 한다(공백 삽입 금지)."""
+    result = convert(make_hwpx(MULTI_RUN_P))
+    assert "수정된 내용은 파란색으로 표시하였습니다." in result.markdown
+    assert "내용 은" not in result.markdown
+
+
+def test_multi_run_cell_joins_without_inserted_space(make_hwpx):
+    """표 셀 안의 다중 run도 동일하게 원문 공백만 유지한다."""
+    result = convert(make_hwpx(MULTI_RUN_CELL))
+    assert "아침자습지도 및 조례, 독서지도" in result.markdown
