@@ -218,11 +218,53 @@ def get_cell_span(cell):
     return int(span.get("rowSpan", "1")), int(span.get("colSpan", "1"))
 
 
-def render_cell_lines(cell) -> list[str]:
+def autonum_text(auto_num) -> str:
+    """``<hp:autoNum num="3" numType="TABLE">``를 본문 글자로 푼다.
+
+    HWP 캡션의 「<표 Ⅱ-3>」에서 번호 3은 텍스트가 아니라 자동 번호 필드다. 이 요소를
+    건너뛰면 정본에 「<표 Ⅱ->」만 남는다(2026-09 2차 검수에서 최종보고서 237곳 실측).
+    표·그림 번호만 풀고 각주 번호(FOOTNOTE)는 본문 흐름에 섞이지 않게 종전대로 무시한다.
+    """
+    if (auto_num.get("numType") or "").upper() == "FOOTNOTE":
+        return ""
+    num = auto_num.get("num") or ""
+    fmt = auto_num.find("hp:autoNumFormat", NS)
+    prefix = suffix = ""
+    if fmt is not None:
+        prefix = fmt.get("prefixChar") or ""
+        suffix = fmt.get("suffixChar") or ""
+    return f"{prefix}{num}{suffix}"
+
+
+def arrow_text(cell) -> str:
+    """텍스트 없는 셀의 화살표 선 도형(``<hp:line>`` + ARROW 화살촉)을 →/↓로 옮긴다.
+
+    흐름표의 화살표 칸은 글자가 아니라 선 도형이라 그냥 두면 빈 칸이 된다. 화살촉이
+    없는 선(구분선)은 빈 칸 그대로. 방향은 ``orgSz``의 가로·세로 길이로 판정한다.
+    """
+    for ln in cell.iter():
+        if localname(ln.tag) != "line":
+            continue
+        shape = ln.find("hp:lineShape", NS)
+        if shape is None:
+            continue
+        styles = {(shape.get("headStyle") or "").upper(), (shape.get("tailStyle") or "").upper()}
+        if not any(st.startswith("ARROW") for st in styles):
+            continue
+        size = ln.find("hp:orgSz", NS)
+        w = int(size.get("width", "0")) if size is not None else 1
+        h = int(size.get("height", "0")) if size is not None else 0
+        return "→" if w >= h else "↓"
+    return ""
+
+
+def render_cell_lines(cell, hoisted: "list | None" = None) -> list[str]:
     """표 셀 안의 텍스트를 문단별 라인 리스트로 추출(reading order 근사).
 
-    중첩표(셀 안의 표)와 글상자(drawText)까지 진입하고 tail 텍스트를 보존한다.
-    중첩표는 구조를 평탄화하여 텍스트만 인라인 수집한다.
+    글상자(drawText)까지 진입하고 tail 텍스트를 보존하며 자동 번호 필드를 글자로 푼다.
+    중첩표(셀 안의 표)는 ``hoisted``가 주어지면 거기에 모아 두고(바깥 표 뒤에 별도 표로
+    렌더), 없으면 종전대로 문단 경계를 지키며 평탄화한다. 텍스트가 전혀 없는 셀에
+    화살표 선 도형만 있으면 화살표 글자 한 줄을 돌려준다.
     """
     lines: list[str] = []
     buf: list[str] = []
@@ -243,22 +285,76 @@ def render_cell_lines(cell) -> list[str]:
                 flush()
             elif tag == "t":
                 buf.append(t_full_text(child))
+            elif tag == "autoNum":
+                buf.append(autonum_text(child))
             elif tag == "tbl":
-                # 중첩표: 셀·문단 경계를 지키며 평탄화한다(문단마다 한 줄). 모든 <hp:t>를
-                # 한 버퍼에 몰아넣으면 셀 경계가 사라져 「학습지도생활지도와」처럼 붙는다.
                 flush()
-                rec(child)
+                if hoisted is not None:
+                    hoisted.append(child)
+                else:
+                    # 중첩표 평탄화: 셀·문단 경계를 지킨다(문단마다 한 줄). 모든 <hp:t>를
+                    # 한 버퍼에 몰아넣으면 셀 경계가 사라져 「학습지도생활지도와」처럼 붙는다.
+                    rec(child)
                 flush()
             else:
                 rec(child)
 
     rec(cell)
     flush()
+    if not lines:
+        arrow = arrow_text(cell)
+        if arrow:
+            lines.append(arrow)
     return lines
 
 
+def unwrap_wrapper_table(tbl):
+    """1×1 표의 유일한 셀 내용이 표 하나뿐이면 그 안쪽 표를 돌려준다(아니면 원래 표).
+
+    HWP에서 표를 글상자처럼 배치하려고 1×1 표로 감싼 경우(직무 도식 등) 바깥 표를
+    그대로 렌더하면 안쪽 표가 한 칸에 평탄화된다. 안쪽 표가 다시 래퍼면 반복해서 벗긴다.
+    """
+    while True:
+        rows = get_table_rows(tbl)
+        if len(rows) != 1:
+            return tbl
+        cells = get_row_cells(rows[0])
+        if len(cells) != 1:
+            return tbl
+        cell = cells[0]
+        inner = [e for e in cell.iter() if localname(e.tag) == "tbl"]
+        if len(inner) != 1:
+            return tbl
+        inner_tbl = inner[0]
+        # 안쪽 표 밖의 텍스트가 있으면 래퍼가 아니다
+        for t in cell.iter():
+            if localname(t.tag) == "t" and inner_tbl not in t.iterancestors() and t_full_text(t).strip():
+                return tbl
+        tbl = inner_tbl
+
+
+MergeFill = Union[bool, str]
+
+
+def _fill_all(merge_fill: MergeFill) -> bool:
+    return merge_fill is True or merge_fill == "all"
+
+
+def _fill_vertical(merge_fill: MergeFill) -> bool:
+    return merge_fill == "vertical"
+
+
+def prune_grid(grid: list[list[str]]) -> list[list[str]]:
+    """모든 칸이 빈 행과 열을 지운다(레이아웃용 빈 칸이 5열 표를 만드는 회귀 대응)."""
+    rows = [r for r in grid if any(c.strip() for c in r)]
+    if not rows:
+        return []
+    keep = [ci for ci in range(len(rows[0])) if any(r[ci].strip() for r in rows)]
+    return [[r[ci] for ci in keep] for r in rows]
+
+
 def table_to_markdown(
-    rows_data: list[list[tuple[str, int]]], merge_fill: bool = False
+    rows_data: list[list[tuple[str, int]]], merge_fill: MergeFill = False
 ) -> str:
     """행 순차 표 데이터([(텍스트, colSpan), ...])를 Markdown 표로 변환(폴백 경로).
 
@@ -279,7 +375,7 @@ def table_to_markdown(
         for text, col_span in row:
             expanded.append(text)
             for _ in range(col_span - 1):
-                expanded.append(text if merge_fill else "")
+                expanded.append(text if _fill_all(merge_fill) else "")
         while len(expanded) < max_cols:
             expanded.append("")
 
@@ -290,7 +386,9 @@ def table_to_markdown(
     return "\n".join(lines)
 
 
-def render_table_md(tbl, cell_br: bool = False, merge_fill: bool = False) -> str:
+def render_table_md(
+    tbl, cell_br: bool = False, merge_fill: MergeFill = False, prune_empty: bool = False
+) -> str:
     """표를 Markdown으로 변환한다.
 
     ``cellAddr``(colAddr/rowAddr) + ``cellSpan``(rowSpan/colSpan) 기반으로 셀을
@@ -303,12 +401,26 @@ def render_table_md(tbl, cell_br: bool = False, merge_fill: bool = False) -> str
     ``merge_fill=True``이면 병합으로 덮인 칸을 빈 칸 대신 시작 칸과 같은 값으로
     채운다. 정보량은 같지만 모든 행이 자족적이 되어 LLM 입력·행 단위 파싱에
     유리하다(기본값 False는 GFM 정렬 보존을 우선). Upstage가 병합값을 스팬된 모든
-    칸에 복제하는 동작과 동등해진다.
+    칸에 복제하는 동작과 동등해진다. ``merge_fill="vertical"``이면 세로 병합(rowSpan)만
+    채우고 가로 병합(colSpan) 칸은 비운다(표 제목 행·유의사항 행이 열 수만큼 반복되지
+    않게). ``prune_empty=True``이면 전부 빈 행·열을 지운다.
+
+    1×1 래퍼 표는 안쪽 표로 바꿔 렌더하고, 셀 안 중첩표는 바깥 표 뒤에 별도 표로 낸다.
     """
+    tbl = unwrap_wrapper_table(tbl)
     sep = "<br>" if cell_br else " "
+    hoisted: list = []
 
     def cell_text(cell):
-        return sep.join(render_cell_lines(cell)).replace("|", "\\|")
+        return sep.join(render_cell_lines(cell, hoisted)).replace("|", "\\|")
+
+    def with_hoisted(md: str) -> str:
+        parts = [md] if md else []
+        for inner in hoisted:
+            inner_md = render_table_md(inner, cell_br=cell_br, merge_fill=merge_fill, prune_empty=prune_empty)
+            if inner_md:
+                parts.append(inner_md)
+        return "\n\n".join(parts)
 
     cells = []
     max_r = max_c = 0
@@ -335,7 +447,7 @@ def render_table_md(tbl, cell_br: bool = False, merge_fill: bool = False) -> str
                 _, col_span = get_cell_span(cell)
                 row_data.append((cell_text(cell), col_span))
             rows_data.append(row_data)
-        return table_to_markdown(rows_data, merge_fill=merge_fill)
+        return with_hoisted(table_to_markdown(rows_data, merge_fill=merge_fill))
 
     grid = [["" for _ in range(max_c)] for _ in range(max_r)]
     # 1단계: 시작 칸(anchor)에 값을 둔다(항상 정확).
@@ -343,25 +455,31 @@ def render_table_md(tbl, cell_br: bool = False, merge_fill: bool = False) -> str
         if 0 <= r < max_r and 0 <= col < max_c:
             grid[r][col] = text  # 병합으로 덮인 칸은 '' 유지 -> 정렬 보존
     # 2단계: merge_fill이면 병합으로 덮인 빈 칸을 시작 칸 값으로 채운다.
-    if merge_fill:
+    # vertical 모드는 같은 열(dc == 0)로 내려가는 세로 병합만 채운다.
+    if _fill_all(merge_fill) or _fill_vertical(merge_fill):
         for (r, col, rs, cs, text) in cells:
             for dr in range(rs):
                 for dc in range(cs):
+                    if dc and _fill_vertical(merge_fill):
+                        continue
                     rr, cc = r + dr, col + dc
                     if (dr or dc) and 0 <= rr < max_r and 0 <= cc < max_c \
                             and grid[rr][cc] == "":
                         grid[rr][cc] = text
 
+    if prune_empty:
+        grid = prune_grid(grid)
     lines = []
-    for ri in range(max_r):
-        lines.append("| " + " | ".join(grid[ri]) + " |")
+    for ri, row in enumerate(grid):
+        lines.append("| " + " | ".join(row) + " |")
         if ri == 0:
-            lines.append("| " + " | ".join(["---"] * max_c) + " |")
-    return "\n".join(lines)
+            lines.append("| " + " | ".join(["---"] * len(row)) + " |")
+    return with_hoisted("\n".join(lines))
 
 
 def render_block_lines(
-    para, cell_br: bool = False, merge_fill: bool = False, image_ctx=None
+    para, cell_br: bool = False, merge_fill: MergeFill = False, image_ctx=None,
+    prune_empty: bool = False,
 ) -> list[str]:
     """최상위 문단을 reading order로 순회하며 라인 리스트를 생성한다.
 
@@ -394,7 +512,7 @@ def render_block_lines(
             tag = localname(child.tag)
             if tag == "tbl":
                 flush()
-                md = render_table_md(child, cell_br=cell_br, merge_fill=merge_fill)
+                md = render_table_md(child, cell_br=cell_br, merge_fill=merge_fill, prune_empty=prune_empty)
                 side, caps = caption_of(child)
                 if side == "TOP":
                     lines.extend(caps)
@@ -427,6 +545,8 @@ def render_block_lines(
                 flush()
             elif tag == "t":
                 buf.append(t_full_text(child))
+            elif tag == "autoNum":
+                buf.append(autonum_text(child))
             else:
                 rec(child)
 
@@ -632,7 +752,8 @@ def _read_section_roots(filepath: PathLike) -> "tuple[list, dict[str, int]]":
 
 
 def _render_roots(
-    roots, cell_br: bool, merge_fill: bool = False, image_ctx=None
+    roots, cell_br: bool, merge_fill: MergeFill = False, image_ctx=None,
+    prune_empty: bool = False,
 ) -> tuple[str, set[str], str]:
     """section root들을 (Markdown 문자열, 원본 단어 집합, 원본 ``<hp:t>`` 텍스트)로 변환.
 
@@ -651,7 +772,7 @@ def _render_roots(
             if localname(child.tag) == "p":
                 all_lines += render_block_lines(
                     child, cell_br=cell_br, merge_fill=merge_fill,
-                    image_ctx=image_ctx,
+                    image_ctx=image_ctx, prune_empty=prune_empty,
                 )
 
     # 연속 빈 줄 정리
@@ -673,10 +794,11 @@ def convert(
     filepath: PathLike,
     *,
     cell_br: bool = False,
-    merge_fill: bool = False,
+    merge_fill: MergeFill = False,
     recall_threshold: float = RECALL_WARN_THRESHOLD,
     image_dir: "str | None" = None,
     image_ref_prefix: str = "",
+    prune_empty: bool = False,
 ) -> ConversionResult:
     """HWPX를 Markdown으로 변환하고 자가검증 결과를 함께 반환한다.
 
@@ -725,7 +847,8 @@ def convert(
         image_ctx = _ImageCtx(id_to_file, image_ref_prefix)
 
     markdown, gt_words, src_text = _render_roots(
-        roots, cell_br=cell_br, merge_fill=merge_fill, image_ctx=image_ctx
+        roots, cell_br=cell_br, merge_fill=merge_fill, image_ctx=image_ctx,
+        prune_empty=prune_empty,
     )
     image_count = count_images(roots)
 
@@ -811,9 +934,10 @@ def to_markdown(
     filepath: PathLike,
     *,
     cell_br: bool = False,
-    merge_fill: bool = False,
+    merge_fill: MergeFill = False,
     image_dir: "str | None" = None,
     image_ref_prefix: str = "",
+    prune_empty: bool = False,
 ) -> str:
     """HWPX를 Markdown 문자열로 변환한다(가장 간단한 진입점).
 
@@ -822,7 +946,9 @@ def to_markdown(
     Args:
         filepath: HWPX 파일 경로(str 또는 Path).
         cell_br: True이면 표 셀 내부 문단을 ``<br>``로 구분한다.
-        merge_fill: True이면 표 병합 칸을 시작 칸 값으로 채운다(:func:`convert` 참조).
+        merge_fill: True이면 표 병합 칸을 시작 칸 값으로 채우고 ``"vertical"``이면
+            세로 병합만 채운다(:func:`convert` 참조).
+        prune_empty: True이면 전부 빈 행·열을 표에서 지운다.
         image_dir: 이미지를 추출할 디렉터리 경로. 지정하면 BinData에서 사용된
             이미지 파일을 이 디렉터리에 쓰고 Markdown에 ``![image](...)`` 참조를
             삽입한다. None(기본)이면 이미지 추출 없이 현행 동작과 동일하다.
@@ -838,4 +964,5 @@ def to_markdown(
         merge_fill=merge_fill,
         image_dir=image_dir,
         image_ref_prefix=image_ref_prefix,
+        prune_empty=prune_empty,
     ).markdown

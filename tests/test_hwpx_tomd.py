@@ -637,9 +637,10 @@ NESTED_TBL_CELL = (
 
 
 def test_nested_table_in_cell_keeps_paragraph_boundaries(make_hwpx):
-    """중첩표의 각 셀 문단은 별도 조각으로 나뉘어야 한다(단어 접합 금지)."""
+    """중첩표는 바깥 표 뒤에 별도 표로 나오고 셀 경계가 접합되지 않아야 한다(0.3.0 호이스팅)."""
     result = convert(make_hwpx(NESTED_TBL_CELL), cell_br=True)
-    assert "수업과 학습지도<br>생활지도와<br>학급경영" in result.markdown
+    assert "| 수업과 학습지도 |" in result.markdown
+    assert "| 생활지도와 | 학급경영 |" in result.markdown
     assert "학습지도생활지도와" not in result.markdown
 
 
@@ -665,3 +666,153 @@ def test_table_caption_bottom_rendered_after_table(make_hwpx):
 def test_table_caption_top_rendered_before_table(make_hwpx):
     md = convert(make_hwpx(_tbl_with_caption("TOP"))).markdown
     assert md.index("<표 1> 현황") < md.index("| 값 |")
+
+
+# --------------------------------------------------------------------------
+# 0.3.0: 2차 검수(2026-09)에서 드러난 구조 손실 5종
+# --------------------------------------------------------------------------
+def _cell(col, row, inner_xml, *, colspan=1, rowspan=1):
+    """subList 내용을 직접 주는 셀 빌더(중첩표·도형 검증용)."""
+    return (
+        "<hp:tc>"
+        f'<hp:cellAddr colAddr="{col}" rowAddr="{row}"/>'
+        f'<hp:cellSpan colSpan="{colspan}" rowSpan="{rowspan}"/>'
+        f"<hp:subList>{inner_xml}</hp:subList>"
+        "</hp:tc>"
+    )
+
+
+AUTONUM_CAPTION_TABLE = (
+    "<hp:p><hp:run><hp:tbl>"
+    '<hp:caption side="TOP"><hp:subList><hp:p><hp:run>'
+    "<hp:t>&lt;표 Ⅱ-</hp:t>"
+    '<hp:ctrl><hp:autoNum num="3" numType="TABLE">'
+    '<hp:autoNumFormat type="DIGIT" userChar="" prefixChar="" suffixChar="" supscript="0"/>'
+    "</hp:autoNum></hp:ctrl>"
+    "<hp:t>&gt; 현황</hp:t>"
+    "</hp:run></hp:p></hp:subList></hp:caption>"
+    "<hp:tr>" + tc(0, 0, "값") + "</hp:tr>"
+    "</hp:tbl></hp:run></hp:p>"
+)
+
+
+def test_autonum_caption_number_rendered(make_hwpx):
+    """캡션의 자동 번호 필드(<hp:autoNum num>)가 글자로 풀려야 한다(「<표 Ⅱ->」 회귀)."""
+    md = convert(make_hwpx(AUTONUM_CAPTION_TABLE)).markdown
+    assert "<표 Ⅱ-3> 현황" in md
+    assert "<표 Ⅱ->" not in md
+
+
+INNER_TABLE = (
+    "<hp:tbl>"
+    "<hp:tr>" + tc(0, 0, "책무") + tc(1, 0, "과업") + "</hp:tr>"
+    "<hp:tr>" + tc(0, 1, "교수학습", rowspan=2) + tc(1, 1, "1. 자율장학") + "</hp:tr>"
+    "<hp:tr>" + tc(1, 2, "2. 전문학습공동체") + "</hp:tr>"
+    "</hp:tbl>"
+)
+
+WRAPPER_TABLE = (
+    "<hp:p><hp:run><hp:tbl>"
+    "<hp:tr>" + _cell(0, 0, "<hp:p><hp:run>" + INNER_TABLE + "</hp:run></hp:p>") + "</hp:tr>"
+    "</hp:tbl></hp:run></hp:p>"
+)
+
+
+def test_wrapper_table_unwrapped_to_inner_grid(make_hwpx):
+    """1×1 래퍼 표의 유일한 내용이 표 하나면 안쪽 표를 그 자리에 렌더한다(직무 도식 회귀)."""
+    md = to_markdown(make_hwpx(WRAPPER_TABLE), merge_fill=True)
+    rows = [ln for ln in md.splitlines() if ln.startswith("|")]
+    assert rows[0] == "| 책무 | 과업 |"
+    assert rows[2] == "| 교수학습 | 1. 자율장학 |"
+    assert rows[3] == "| 교수학습 | 2. 전문학습공동체 |"
+    assert "<br>" not in md
+
+
+NESTED_WITH_TEXT = (
+    "<hp:p><hp:run><hp:tbl>"
+    "<hp:tr>" + _cell(
+        0, 0,
+        "<hp:p><hp:run><hp:t>[별표4] 자격기준</hp:t></hp:run></hp:p>"
+        "<hp:p><hp:run>"
+        "<hp:tbl>"
+        "<hp:tr>" + tc(0, 0, "지원유형") + tc(1, 0, "자격기준") + "</hp:tr>"
+        "<hp:tr>" + tc(0, 1, "제1유형") + tc(1, 1, "가능한 사람") + "</hp:tr>"
+        "</hp:tbl>"
+        "</hp:run></hp:p>",
+    ) + "</hp:tr>"
+    "</hp:tbl></hp:run></hp:p>"
+)
+
+
+def test_nested_table_hoisted_after_outer(make_hwpx):
+    """셀 안 중첩표는 평탄화하지 않고 바깥 표 뒤에 별도 표로 낸다."""
+    md = to_markdown(make_hwpx(NESTED_WITH_TEXT), cell_br=True)
+    rows = [ln for ln in md.splitlines() if ln.startswith("|")]
+    assert rows[0] == "| [별표4] 자격기준 |"
+    assert "| 지원유형 | 자격기준 |" in rows
+    assert "| 제1유형 | 가능한 사람 |" in rows
+    assert md.index("[별표4]") < md.index("| 지원유형 |")
+    assert "지원유형<br>" not in md
+
+
+def _arrow_line(width, height, head="NORMAL", tail="ARROW"):
+    return (
+        "<hp:p><hp:run><hp:line>"
+        f'<hp:orgSz width="{width}" height="{height}"/>'
+        f'<hp:lineShape headStyle="{head}" tailStyle="{tail}"/>'
+        "</hp:line></hp:run></hp:p>"
+    )
+
+
+ARROW_TABLE = (
+    "<hp:p><hp:run><hp:tbl>"
+    "<hp:tr>" + tc(0, 0, "심한장애") + _cell(1, 0, _arrow_line(2830, 1)) + tc(2, 0, "중증장애") + "</hp:tr>"
+    "<hp:tr>" + tc(0, 1, "판단") + _cell(1, 1, _arrow_line(1, 1200)) + tc(2, 1, "결과") + "</hp:tr>"
+    "<hp:tr>" + tc(0, 2, "선") + _cell(1, 2, _arrow_line(2000, 1, tail="NORMAL")) + tc(2, 2, "없음") + "</hp:tr>"
+    "</hp:tbl></hp:run></hp:p>"
+)
+
+
+def test_arrow_shape_cell_rendered_as_arrow(make_hwpx):
+    """텍스트 없는 셀의 화살표 선 도형은 방향에 따라 →/↓, 화살촉 없는 선은 빈 칸."""
+    rows = [ln for ln in to_markdown(make_hwpx(ARROW_TABLE)).splitlines() if ln.startswith("|")]
+    assert rows[0] == "| 심한장애 | → | 중증장애 |"
+    assert rows[2] == "| 판단 | ↓ | 결과 |"
+    assert rows[3] == "| 선 |  | 없음 |"
+
+
+def test_merge_fill_vertical_only(make_hwpx):
+    """merge_fill='vertical': rowSpan 칸만 채우고 colSpan 칸은 비운다(9/7 결정 2)."""
+    md = to_markdown(make_hwpx(MERGED_TABLE + ROWSPAN_TABLE), merge_fill="vertical")
+    rows = [ln for ln in md.splitlines() if ln.startswith("|")]
+    assert rows[0] == "| 헤더 |  |"
+    assert rows[5] == "| 좌 | 우하 |"
+
+
+def test_cli_merge_fill_vertical(make_hwpx, capsys):
+    code = main([str(make_hwpx(ROWSPAN_TABLE)), "--stdout", "--merge-fill-vertical"])
+    assert code == 0
+    assert "| 좌 | 우하 |" in capsys.readouterr().out
+
+
+SPARSE_TABLE = (
+    "<hp:p><hp:run><hp:tbl>"
+    "<hp:tr>" + tc(0, 0, "") + tc(1, 0, "제목") + tc(2, 0, "") + "</hp:tr>"
+    "<hp:tr>" + tc(0, 1, "") + tc(1, 1, "내용") + tc(2, 1, "") + "</hp:tr>"
+    "<hp:tr>" + tc(0, 2, "") + tc(1, 2, "") + tc(2, 2, "") + "</hp:tr>"
+    "</hp:tbl></hp:run></hp:p>"
+)
+
+
+def test_prune_empty_rows_and_columns(make_hwpx):
+    """prune_empty: 전부 빈 행·열을 지운다(참고 박스가 5열 표로 나오던 회귀)."""
+    default = [ln for ln in to_markdown(make_hwpx(SPARSE_TABLE)).splitlines() if ln.startswith("|")]
+    pruned = [ln for ln in to_markdown(make_hwpx(SPARSE_TABLE), prune_empty=True).splitlines() if ln.startswith("|")]
+    assert default[0] == "|  | 제목 |  |"
+    assert pruned == ["| 제목 |", "| --- |", "| 내용 |"]
+
+
+def test_cli_prune_empty(make_hwpx, capsys):
+    code = main([str(make_hwpx(SPARSE_TABLE)), "--stdout", "--prune-empty"])
+    assert code == 0
+    assert "| 제목 |\n| --- |\n| 내용 |" in capsys.readouterr().out

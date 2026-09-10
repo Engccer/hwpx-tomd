@@ -58,6 +58,17 @@ def build_parser() -> argparse.ArgumentParser:
         "(행 단위 파싱·LLM 입력용; 기본은 GFM 열 정렬 보존)",
     )
     parser.add_argument(
+        "--merge-fill-vertical",
+        action="store_true",
+        help="세로 병합(rowSpan) 칸만 같은 값으로 채우고 가로 병합(colSpan) 칸은 비움 "
+        "(표 제목 행·유의사항 행이 열 수만큼 반복되지 않게)",
+    )
+    parser.add_argument(
+        "--prune-empty",
+        action="store_true",
+        help="전부 빈 행·열을 표에서 지움 (레이아웃용 빈 칸이 만드는 5열 참고 박스 등)",
+    )
+    parser.add_argument(
         "--image-dir",
         help="본문 이미지를 추출할 폴더. 지정 시 md에 ![image](...) 참조와 "
         "<image-dir>/_image_map.json(매핑) 생성. 미지정 시 이미지 생략(현행)",
@@ -93,7 +104,8 @@ def main(argv: list[str] | None = None) -> int:
         result = convert(
             in_path,
             cell_br=args.cell_br,
-            merge_fill=args.merge_fill,
+            merge_fill="vertical" if args.merge_fill_vertical else args.merge_fill,
+            prune_empty=args.prune_empty,
             image_dir=args.image_dir,
             image_ref_prefix=args.image_prefix,
         )
