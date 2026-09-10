@@ -308,6 +308,22 @@ def render_cell_lines(cell, hoisted: "list | None" = None) -> list[str]:
     return lines
 
 
+def caption_lines(obj) -> "tuple[str | None, list[str]]":
+    """표·그림 개체의 <hp:caption>(있으면) → (side, 캡션 줄 목록). 캡션은 본문이다."""
+    for c in obj:
+        if localname(c.tag) == "caption":
+            return (c.get("side") or "BOTTOM").upper(), render_cell_lines(c)
+    return None, []
+
+
+def with_caption(md: str, obj) -> str:
+    """표 Markdown 앞뒤에 그 표 자신의 캡션을 붙인다(side=TOP이면 앞, 그 밖은 뒤)."""
+    side, caps = caption_lines(obj)
+    if not caps:
+        return md
+    return "\n".join(caps + [md]) if side == "TOP" else "\n".join([md] + caps)
+
+
 def unwrap_wrapper_table(tbl):
     """1×1 표의 유일한 셀 내용이 표 하나뿐이면 그 안쪽 표를 돌려준다(아니면 원래 표).
 
@@ -419,7 +435,7 @@ def render_table_md(
         for inner in hoisted:
             inner_md = render_table_md(inner, cell_br=cell_br, merge_fill=merge_fill, prune_empty=prune_empty)
             if inner_md:
-                parts.append(inner_md)
+                parts.append(with_caption(inner_md, inner))  # 호이스팅된 표의 캡션도 함께
         return "\n\n".join(parts)
 
     cells = []
@@ -501,11 +517,15 @@ def render_block_lines(
             buf.clear()
 
     def caption_of(obj):
-        """표·그림 개체의 <hp:caption>(있으면) → (side, 캡션 줄 목록). 캡션은 본문이다."""
-        for c in obj:
-            if localname(c.tag) == "caption":
-                return (c.get("side") or "BOTTOM").upper(), render_cell_lines(c)
-        return None, []
+        """개체의 캡션. 1×1 래퍼 표면 실제로 렌더되는 안쪽 표의 캡션까지 본다(래퍼·안쪽 둘 다 있으면 순서대로)."""
+        side, caps = caption_lines(obj)
+        if localname(obj.tag) == "tbl":
+            inner = unwrap_wrapper_table(obj)
+            if inner is not obj:
+                iside, icaps = caption_lines(inner)
+                if icaps:
+                    side, caps = (side or iside), caps + icaps
+        return side, caps
 
     def rec(node):
         for child in node:

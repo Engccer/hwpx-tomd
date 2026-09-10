@@ -816,3 +816,33 @@ def test_cli_prune_empty(make_hwpx, capsys):
     code = main([str(make_hwpx(SPARSE_TABLE)), "--stdout", "--prune-empty"])
     assert code == 0
     assert "| 제목 |\n| --- |\n| 내용 |" in capsys.readouterr().out
+
+
+def _captioned(tbl_xml, text):
+    return tbl_xml.replace("<hp:tbl>", f'<hp:tbl><hp:caption side="BOTTOM"><hp:subList><hp:p><hp:run><hp:t>{text}</hp:t></hp:run></hp:p></hp:subList></hp:caption>', 1)
+
+
+def test_wrapper_inner_table_caption_kept(make_hwpx):
+    """래퍼를 벗겨도 안쪽 표의 캡션은 남아야 한다(리뷰 P2)."""
+    body = (
+        "<hp:p><hp:run><hp:tbl>"
+        "<hp:tr>" + _cell(0, 0, "<hp:p><hp:run>" + _captioned(INNER_TABLE, "[표 1] 직무 도식") + "</hp:run></hp:p>") + "</hp:tr>"
+        "</hp:tbl></hp:run></hp:p>"
+    )
+    md = to_markdown(make_hwpx(body))
+    assert "[표 1] 직무 도식" in md
+    assert md.index("| 책무 | 과업 |") < md.index("[표 1] 직무 도식")
+
+
+def test_hoisted_table_caption_kept(make_hwpx):
+    """호이스팅된 중첩표의 캡션은 그 표 뒤에 붙어야 한다(리뷰 P2)."""
+    inner = _captioned(
+        "<hp:tbl><hp:tr>" + tc(0, 0, "지원유형") + tc(1, 0, "자격기준") + "</hp:tr></hp:tbl>", "[표 2] 자격기준")
+    body = (
+        "<hp:p><hp:run><hp:tbl>"
+        "<hp:tr>" + _cell(0, 0, "<hp:p><hp:run><hp:t>[별표4]</hp:t></hp:run></hp:p><hp:p><hp:run>" + inner + "</hp:run></hp:p>") + "</hp:tr>"
+        "</hp:tbl></hp:run></hp:p>"
+    )
+    md = to_markdown(make_hwpx(body))
+    assert "[표 2] 자격기준" in md
+    assert md.index("| 지원유형 | 자격기준 |") < md.index("[표 2] 자격기준")
