@@ -795,6 +795,37 @@ def test_cli_merge_fill_vertical(make_hwpx, capsys):
     assert "| 좌 | 우하 |" in capsys.readouterr().out
 
 
+# 첫 행의 두 칸이 모두 rowSpan=2인 표: 둘째 행은 전부 병합 연속이라 정보가 없다.
+ALL_CONTINUATION_TABLE = (
+    "<hp:p><hp:run><hp:tbl>"
+    "<hp:tr>" + tc(0, 0, "사안발생", rowspan=2) + tc(1, 0, "신고", rowspan=2) + "</hp:tr>"
+    "<hp:tr></hp:tr>"
+    "<hp:tr>" + tc(0, 2, "↓") + tc(1, 2, "") + "</hp:tr>"
+    "</hp:tbl></hp:run></hp:p>"
+)
+
+
+def test_all_continuation_row_dropped(make_hwpx):
+    """모든 칸이 세로 병합 연속인 행은 지운다(절차표 단계 행이 두 번씩 나오던 3차 검수 회귀, 0.3.1)."""
+    filled = [ln for ln in to_markdown(make_hwpx(ALL_CONTINUATION_TABLE), merge_fill="vertical").splitlines() if ln.startswith("|")]
+    assert filled == ["| 사안발생 | 신고 |", "| --- | --- |", "| ↓ |  |"]
+    plain = [ln for ln in to_markdown(make_hwpx(ALL_CONTINUATION_TABLE)).splitlines() if ln.startswith("|")]
+    assert plain == ["| 사안발생 | 신고 |", "| --- | --- |", "| ↓ |  |"]
+    # 레이아웃용 빈 열(빈 시작 칸)이 함께 있어도 새 값이 없는 행은 지운다(단위학교 절차표 실측)
+    body = (
+        "<hp:p><hp:run><hp:tbl>"
+        "<hp:tr>" + tc(0, 0, "사안발생", rowspan=2) + tc(1, 0, "신고", rowspan=2) + tc(2, 0, "") + "</hp:tr>"
+        "<hp:tr>" + tc(2, 1, "") + "</hp:tr>"
+        "<hp:tr>" + tc(0, 2, "↓") + tc(1, 2, "") + tc(2, 2, "") + "</hp:tr>"
+        "</hp:tbl></hp:run></hp:p>"
+    )
+    pruned = [ln for ln in to_markdown(make_hwpx(body), merge_fill="vertical", prune_empty=True).splitlines() if ln.startswith("|")]
+    assert pruned == ["| 사안발생 | 신고 |", "| --- | --- |", "| ↓ |  |"]
+    # 한 칸이라도 새 값이 있는 행은 남는다(ROWSPAN_TABLE 둘째 행 「우하」)
+    kept = [ln for ln in to_markdown(make_hwpx(ROWSPAN_TABLE), merge_fill="vertical").splitlines() if ln.startswith("|")]
+    assert kept[2] == "| 좌 | 우하 |"
+
+
 SPARSE_TABLE = (
     "<hp:p><hp:run><hp:tbl>"
     "<hp:tr>" + tc(0, 0, "") + tc(1, 0, "제목") + tc(2, 0, "") + "</hp:tr>"

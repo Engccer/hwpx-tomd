@@ -470,6 +470,7 @@ def render_table_md(
     for (r, col, rs, cs, text) in cells:
         if 0 <= r < max_r and 0 <= col < max_c:
             grid[r][col] = text  # 병합으로 덮인 칸은 '' 유지 -> 정렬 보존
+    anchor_empty = [[c == "" for c in row] for row in grid]  # 채우기 전 빈 칸(시작 칸이 비었거나 병합 연속)
     # 2단계: merge_fill이면 병합으로 덮인 빈 칸을 시작 칸 값으로 채운다.
     # vertical 모드는 같은 열(dc == 0)로 내려가는 세로 병합만 채운다.
     if _fill_all(merge_fill) or _fill_vertical(merge_fill):
@@ -483,6 +484,18 @@ def render_table_md(
                             and grid[rr][cc] == "":
                         grid[rr][cc] = text
 
+    # 새 값이 하나도 없는 행 — 모든 칸이 위 행 세로 병합(rowSpan)의 연속이거나 빈 시작 칸이고 연속 칸이 하나라도
+    # 있는 행 — 은 GFM에서 표현할 정보가 없다. merge_fill이면 위 행과 똑같은 행이, 아니면 빈 행이 됐다(절차표의
+    # 단계 행이 두 번씩 나오던 문제, 0.3.1). 빈 시작 칸까지 보는 이유: 레이아웃용 빈 열이 함께 있으면 그 칸은
+    # 연속이 아니라서 행이 살아남고, 그 열이 prune_empty로 지워진 뒤 똑같은 행만 남았다.
+    continuation = [[False] * max_c for _ in range(max_r)]
+    for (r, col, rs, cs, _text) in cells:
+        for dr in range(1, rs):
+            for dc in range(cs):
+                if 0 <= r + dr < max_r and 0 <= col + dc < max_c:
+                    continuation[r + dr][col + dc] = True
+    grid = [row for ri, row in enumerate(grid)
+            if not (any(continuation[ri]) and all(continuation[ri][ci] or anchor_empty[ri][ci] for ci in range(max_c)))]
     if prune_empty:
         grid = prune_grid(grid)
     lines = []
