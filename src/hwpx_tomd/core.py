@@ -21,6 +21,7 @@ CLI 출력·종료 코드 변환은 :mod:`hwpx_tomd.cli`가 담당한다.
 from __future__ import annotations
 
 import os
+import posixpath
 import re
 import zipfile
 from collections import Counter
@@ -725,6 +726,62 @@ def _parse_section_xml(raw: bytes):
     return etree.fromstring(raw, parser=etree.XMLParser(**_XML_PARSER_OPTIONS))
 
 
+def _ordered_section_files(zf) -> list[str]:
+    """content.hpf의 spine을 따르고, 순서 정보가 없을 때만 숫자로 정렬한다."""
+    names = zf.namelist()
+    sections = [name for name in names
+                if "section" in name.lower() and name.endswith(".xml") and "Contents/" in name]
+
+    def numeric_key(name):
+        match = re.search(r"section(\d+)\.xml$", name, re.I)
+        return (int(match[1]) if match else float("inf"), name)
+
+    fallback = sorted(sections, key=numeric_key)
+    if "Contents/content.hpf" not in names:
+        return fallback
+    try:
+        package = _parse_section_xml(zf.read("Contents/content.hpf"))
+    except _XML_PARSE_ERROR as exc:
+        raise HwpxParseError(f"content.hpf 파싱에 실패했습니다: {exc}") from exc
+    spines = [node for node in package if localname(node.tag) == "spine"]
+    if not spines:
+        return fallback
+    if len(spines) != 1:
+        raise HwpxParseError("content.hpf에 spine이 여러 개 있습니다")
+    items = {}
+    for manifest in package:
+        if localname(manifest.tag) != "manifest":
+            continue
+        for item in manifest:
+            if localname(item.tag) != "item":
+                continue
+            item_id = item.get("id")
+            if not item_id or item_id in items:
+                raise HwpxParseError("content.hpf manifest의 item id가 없거나 중복됩니다")
+            items[item_id] = item.get("href")
+    ordered = []
+    for reference in spines[0]:
+        if localname(reference.tag) != "itemref":
+            continue
+        item_id = reference.get("idref")
+        href = items.get(item_id)
+        if not href:
+            raise HwpxParseError(f"content.hpf spine의 참조를 찾을 수 없습니다: {item_id}")
+        target = posixpath.normpath(href)
+        if target not in names:
+            target = posixpath.normpath(posixpath.join("Contents", href))
+        if target not in names:
+            raise HwpxParseError(f"content.hpf spine의 파일을 찾을 수 없습니다: {target}")
+        if target in sections:
+            if target in ordered:
+                raise HwpxParseError(f"content.hpf spine의 구역 참조가 중복됩니다: {target}")
+            ordered.append(target)
+    missing = set(sections) - set(ordered)
+    if missing:
+        raise HwpxParseError("content.hpf spine에 구역 참조가 없습니다: " + ", ".join(sorted(missing)))
+    return ordered
+
+
 def _read_section_roots(filepath: PathLike) -> "tuple[list, dict[str, int]]":
     """HWPX zip에서 ``Contents/sectionN.xml``들을 파싱해 root 리스트를 반환.
 
@@ -748,11 +805,7 @@ def _read_section_roots(filepath: PathLike) -> "tuple[list, dict[str, int]]":
 
     try:
         with zipfile.ZipFile(filepath, "r") as zf:
-            section_files = sorted(
-                n
-                for n in zf.namelist()
-                if "section" in n.lower() and n.endswith(".xml") and "Contents/" in n
-            )
+            section_files = _ordered_section_files(zf)
             if not section_files:
                 raise HwpxParseError(
                     "section XML 파일을 찾을 수 없습니다 (Contents/sectionN.xml). "
