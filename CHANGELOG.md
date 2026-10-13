@@ -2,6 +2,20 @@
 
 이 프로젝트의 주요 변경 사항을 기록합니다. 형식은 [Keep a Changelog](https://keepachangelog.com/ko/1.1.0/)를 따르고, 버전은 [Semantic Versioning](https://semver.org/lang/ko/)을 따릅니다.
 
+## [0.4.0] - 2026-10-14
+
+### 추가
+- lxml이 없거나 import 중 `ImportError`·`OSError`가 발생하면 표준 라이브러리 `xml.etree.ElementTree`로 읽는다. lxml은 `[lxml]` 선택 설치로 옮겼다.
+- 표준 라이브러리만 사용한 별도 프로세스에서 읽기와 오류 계약을 검증하고, 두 파서의 Markdown·recall·경고를 대조하는 합성 회귀 테스트를 추가했다.
+
+### 수정
+- 중첩 표의 조상 검사에서 lxml 전용 API를 제거해 두 파서가 같은 표 구조를 처리한다.
+- XML 주석·처리 지시문을 두 파서에서 동일하게 제외하고 그 앞뒤의 텍스트·선택지 마커를 보존한다.
+- 표준 라이브러리 파서에서 알 수 없거나 지원하지 않는 XML 인코딩도 `HwpxParseError`로 보고한다. 제어문자 제거 후 재시도에서도 같은 오류 계층을 유지한다.
+
+### 제한
+- 결과 동등성 검증 범위는 기존 합성 fixture와 UTF-8 회귀 문서다. EUC-KR section XML 합성 입력은 lxml에서 읽히지만 표준 라이브러리에서는 `HwpxParseError`로 실패한다.
+
 ## [0.3.1] - 2026-09-23
 
 ### Fixed

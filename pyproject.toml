@@ -25,9 +25,10 @@ classifiers = [
     "Topic :: Text Processing :: Markup :: Markdown",
     "Natural Language :: Korean",
 ]
-dependencies = ["lxml>=4.9"]
+dependencies = []
 
 [project.optional-dependencies]
+lxml = ["lxml>=4.9"]
 test = ["pytest>=7.0"]
 
 [project.urls]

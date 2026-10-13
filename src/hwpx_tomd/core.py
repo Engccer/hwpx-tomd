@@ -28,7 +28,18 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Union
 
-from lxml import etree
+try:
+    from lxml import etree
+except (ImportError, OSError):
+    from xml.etree import ElementTree as etree
+
+    # 알 수 없는 인코딩은 LookupError, 미지원 다중 바이트 인코딩은 ValueError다.
+    _XML_PARSE_ERROR = (etree.ParseError, LookupError, ValueError)
+    _XML_PARSER_OPTIONS = {}
+else:
+    _XML_PARSE_ERROR = etree.XMLSyntaxError
+    # ElementTree와 같이 메타 노드를 제외하고 그 앞뒤의 본문 텍스트는 잇는다.
+    _XML_PARSER_OPTIONS = {"remove_comments": True, "remove_pis": True}
 
 __all__ = [
     "NS",
@@ -342,9 +353,10 @@ def unwrap_wrapper_table(tbl):
         if len(inner) != 1:
             return tbl
         inner_tbl = inner[0]
+        inner_nodes = set(inner_tbl.iter())
         # 안쪽 표 밖의 텍스트가 있으면 래퍼가 아니다
         for t in cell.iter():
-            if localname(t.tag) == "t" and inner_tbl not in t.iterancestors() and t_full_text(t).strip():
+            if localname(t.tag) == "t" and t not in inner_nodes and t_full_text(t).strip():
                 return tbl
         tbl = inner_tbl
 
@@ -709,13 +721,17 @@ def _build_image_map(ctx: "_ImageCtx") -> dict[str, dict[str, object]]:
     return out
 
 
+def _parse_section_xml(raw: bytes):
+    return etree.fromstring(raw, parser=etree.XMLParser(**_XML_PARSER_OPTIONS))
+
+
 def _read_section_roots(filepath: PathLike) -> "tuple[list, dict[str, int]]":
     """HWPX zip에서 ``Contents/sectionN.xml``들을 파싱해 root 리스트를 반환.
 
     hwp2hwpx 변환본은 하이퍼링크 필드의 ``<hp:stringParam name="Command">`` 값에
     HWP 바이너리의 NUL 패딩을 그대로 써 넣는 일이 있다. NUL을 비롯한
     :data:`_ILLEGAL_XML_BYTES` 대상 문자는 XML 1.0에서 이스케이프로도 표현할 수
-    없어 lxml이 그 지점에서 파싱을 중단한다. 첫 파싱이 실패하면 그 바이트만
+    없어 XML 파서가 그 지점에서 파싱을 중단한다. 첫 파싱이 실패하면 그 바이트만
     제거하고 한 번 더 시도한다(정상 파일에는 비용이 들지 않는 실패 시 경로).
 
     Returns:
@@ -747,9 +763,9 @@ def _read_section_roots(filepath: PathLike) -> "tuple[list, dict[str, int]]":
             for sf in section_files:
                 raw = zf.read(sf)
                 try:
-                    roots.append(etree.fromstring(raw))
+                    roots.append(_parse_section_xml(raw))
                     continue
-                except etree.XMLSyntaxError as exc:
+                except _XML_PARSE_ERROR as exc:
                     first_exc = exc
 
                 # 불법 제어문자만 제거해 재시도. 대상 바이트는 XML 1.0 Char
@@ -759,10 +775,10 @@ def _read_section_roots(filepath: PathLike) -> "tuple[list, dict[str, int]]":
                 cleaned = _ILLEGAL_XML_BYTES.sub(b"", raw)
                 if cleaned != raw:
                     try:
-                        roots.append(etree.fromstring(cleaned))
+                        roots.append(_parse_section_xml(cleaned))
                         sanitized[sf] = len(raw) - len(cleaned)
                         continue
-                    except etree.XMLSyntaxError as retry_exc:
+                    except _XML_PARSE_ERROR as retry_exc:
                         # 제어문자 말고 다른 손상이 남은 경우. 첫 예외는 제거된
                         # 문자 위치를 가리켜 오도하므로 재시도 예외를 보고한다.
                         raise HwpxParseError(
@@ -771,7 +787,7 @@ def _read_section_roots(filepath: PathLike) -> "tuple[list, dict[str, int]]":
                             f"있습니다: {retry_exc}"
                         ) from retry_exc
 
-                # zip은 정상이나 내부 section XML이 손상된 경우. lxml 예외가
+                # zip은 정상이나 내부 section XML이 손상된 경우. 파서 예외가
                 # 그대로 새어 나가지 않도록 HwpxParseError로 감싼다(모든 파싱
                 # 실패는 HwpxError 한 계층으로 잡힌다는 계약 유지).
                 raise HwpxParseError(
