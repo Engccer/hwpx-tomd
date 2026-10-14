@@ -4,7 +4,7 @@
 
 ## 이 엔진을 공유하는 두 소비자
 
-이 패키지는 두 Claude Code 스킬이 같은 `core.py`를 호출해 씁니다. 변환 결함을 어느 쪽에서 발견하든 고치는 곳은 한 군데, 바로 이 엔진입니다.
+이 패키지는 두 스킬이 같은 `core.py`를 호출해 씁니다. 변환 결함을 어느 쪽에서 발견하든 고치는 곳은 한 군데, 바로 이 엔진입니다.
 
 - `hwpx-automation` 스킬: `hwpx_edit.py --to-md`가 `from hwpx_tomd import convert`를 호출.
 - `docparse` 스킬: `parsers/hwpx_local_parse.py`가 동일 엔진을 호출(`_hwpxlocal.md` 출력).

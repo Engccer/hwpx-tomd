@@ -10,7 +10,7 @@ readme = "README.md"
 requires-python = ">=3.10"
 license = "MIT"
 license-files = ["LICENSE"]
-authors = [{ name = "Hunyong Kim", email = "engccer@gmail.com" }]
+authors = [{ name = "Hunyong Kim", email = "engccer@gmail.com" }]  # sanitize: allow 공개 패키지 저자 연락처
 keywords = ["hwpx", "hancom", "hwp", "markdown", "converter", "korean", "document", "ooxml"]
 classifiers = [
     "Development Status :: 3 - Alpha",
