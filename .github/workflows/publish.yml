@@ -1,0 +1,102 @@
+# master에 push하면 테스트·빌드를 돌리고, _version.py의 버전이 PyPI에 아직 없을 때만 배포한다.
+# 배포는 PyPI Trusted Publishing(토큰 없음)으로 하고, 배포 뒤 v<버전> 태그를 붙인다.
+name: 테스트·배포
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: publish-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.10", "3.11", "3.12", "3.13", "3.14", "3.15"]
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python }}
+      - run: python -m pip install -e ".[test,lxml]"
+      - name: 테스트 (lxml)
+        run: python -m pytest -q
+      - name: 테스트 (표준 라이브러리만)
+        run: |
+          python -m pip uninstall -y lxml
+          python -m pytest -q
+
+  build:
+    needs: test
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      new: ${{ steps.version.outputs.new }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - run: python -m pip install build twine
+      - run: python -m build
+      - run: python -m twine check --strict dist/*
+      - name: 버전 판정
+        id: version
+        run: |
+          version=$(python -c "import re; print(re.search(r'__version__ = \"([^\"]+)\"', open('src/hwpx_tomd/_version.py').read())[1])")
+          ls dist/hwpx_tomd-"$version"-py3-none-any.whl dist/hwpx_tomd-"$version".tar.gz
+          code=$(curl -s -o /dev/null -w '%{http_code}' "https://pypi.org/pypi/hwpx-tomd/$version/json")
+          case "$code" in
+            200) new=false ;;
+            404) new=true ;;
+            *) echo "PyPI 조회 실패: HTTP $code"; exit 1 ;;
+          esac
+          echo "버전 $version, PyPI에 새 버전: $new"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "new=$new" >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+  publish:
+    needs: build
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/master' && needs.build.outputs.new == 'true'
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/project/hwpx-tomd/${{ needs.build.outputs.version }}/
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+      - uses: pypa/gh-action-pypi-publish@release/v1
+
+  tag:
+    needs: [build, publish]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      TAG: v${{ needs.build.outputs.version }}
+    steps:
+      - uses: actions/checkout@v5
+      - run: |
+          if git ls-remote --exit-code --tags origin "refs/tags/$TAG" >/dev/null; then
+            echo "$TAG 태그가 이미 있습니다"
+          else
+            git tag "$TAG" "$GITHUB_SHA"
+            git push origin "$TAG"
+          fi

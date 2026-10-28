@@ -17,7 +17,7 @@
 
 | 역할 | 엔진 보유 형태 | 경로 |
 |------|---------------|------|
-| **유지보수자** (editable git 체크아웃 보유) | `pip install -e .` | 로컬에서 red-green 수정 → 버전 bump → `git push` → PyPI publish. editable이라 수정이 소비 스킬에 즉시 라이브 반영 |
+| **유지보수자** (editable git 체크아웃 보유) | `pip install -e .` | 로컬에서 red-green 수정 → 버전 bump → `git push`. PyPI 배포는 자동이다(아래 "배포"). editable이라 수정이 소비 스킬에 즉시 라이브 반영 |
 | **다운스트림 사용자** (PyPI 설치) | `pip install hwpx-tomd` | site-packages를 직접 고치면 재설치 때 사라지고 upstream에도 안 남는다. **이슈를 열거나 PR을 보낸다**(아래 절차) |
 
 다른 머신(예: 두 번째 작업 PC)에서 PyPI로만 설치해 쓰는 경우도 다운스트림과 동일합니다. 고친 뒤 push하고 그 머신에서는 `pip install -U hwpx-tomd`로 받습니다. 머신 간 동기화는 파일 복사가 아니라 GitHub pull/push로 합니다.
@@ -39,7 +39,7 @@
 2. **실패하는 회귀 테스트를 먼저 추가**: `tests/test_hwpx_tomd.py`에 결함을 드러내는 테스트를 넣고, 수정 전 빨간불(fail)을 확인합니다. 픽스처는 `tests/conftest.py`가 동적으로 만드는 **합성 HWPX**를 따릅니다(아래 정책).
 3. `src/hwpx_tomd/core.py`를 고쳐 초록불(pass)로 만듭니다. 부작용 없는 순수 함수 원칙을 지킵니다(`print`/`sys.exit`는 `cli.py`에만).
 4. 회귀 가드(객관식 마커 보존, 단어·글자 recall)를 포함한 기존 테스트 전체(`pytest`)가 모두 통과하는지 확인합니다.
-5. PR을 엽니다. **버전(`_version.py`) bump와 PyPI publish는 유지보수자가** 머지 후 진행하므로, 기여자는 버전을 올리지 않아도 됩니다.
+5. PR을 엽니다. **버전(`_version.py`) bump는 유지보수자가** 머지 후 진행하고 그 push로 PyPI에 자동 배포되므로, 기여자는 버전을 올리지 않아도 됩니다.
 
 ## 개발 환경·테스트
 
@@ -57,6 +57,16 @@ uv run --extra test pytest
 ```bash
 hwpx-tomd file.hwpx --stdout
 ```
+
+## 배포
+
+master에 push하면 `.github/workflows/publish.yml`이 Python 3.10~3.15에서 테스트하고 빌드한 뒤, `src/hwpx_tomd/_version.py`의 버전이 PyPI에 없을 때만 PyPI에 올리고 `v<버전>` 태그를 붙입니다. 인증은 PyPI Trusted Publishing이라 토큰을 어디에도 두지 않습니다.
+
+- **버전을 올려 push하는 것이 곧 공개 배포다.** 유지보수자의 상시 승인이므로 따로 묻지 않는다. 대신 버전을 올리는 커밋에는 `CHANGELOG.md`의 해당 버전 항목을 함께 넣는다.
+- PyPI는 한 번 올린 버전을 다시 받지 않는다. 고칠 것이 생기면 다음 버전으로 낸다.
+- 버전이 PyPI에 이미 있으면(버전을 올리지 않은 push) 테스트·빌드만 하고 배포하지 않는다. 소스를 고쳐도 버전을 올리지 않으면 배포되지 않는다.
+- 3.10~3.15 중 한 버전의 테스트라도 실패하면 배포하지 않는다. GitHub Actions 실행 결과에서 실패를 확인하고 고친 뒤 다시 push한다.
+- 배포는 됐는데 태그만 실패했으면 다음 실행이 태그를 다시 붙이지 않는다. `git tag v<버전> <커밋>` 후 `git push origin v<버전>`으로 직접 붙인다.
 
 ## 테스트 데이터 정책 (중요)
 
