@@ -2,7 +2,13 @@
 
 이 프로젝트의 주요 변경 사항을 기록합니다. 형식은 [Keep a Changelog](https://keepachangelog.com/ko/1.1.0/)를 따르고, 버전은 [Semantic Versioning](https://semver.org/lang/ko/)을 따릅니다.
 
-## [Unreleased]
+## [0.4.1] - 2026-10-28
+
+0.3.0~0.4.0은 PyPI에 따로 배포되지 않았고, 그 변경은 모두 이 버전에 들어 있다.
+
+### 수정
+- 구역(section) 순서를 `Contents/content.hpf`의 spine 순서로 읽는다. 파일 이름을 글자 순으로 정렬해 구역이 10개 이상인 문서에서 `section10`이 `section2`보다 먼저 나오던 문제를 고쳤다. spine이 없으면 구역 번호의 숫자 순서로 읽는다.
+- `content.hpf`가 깨졌거나, spine에서 구역이 빠졌거나 중복되거나 없는 파일을 가리키면 `HwpxParseError`로 보고한다.
 
 ### 변경
 - 지원 버전 표시에 Python 3.14·3.15를 추가했다.
@@ -73,6 +79,8 @@
 - 이미지 포함 문서에 대한 경고 출력
 - 라이브러리 API(`to_markdown`, `convert`)와 CLI(`hwpx-tomd`)
 
+[0.4.1]: https://github.com/Engccer/hwpx-tomd/compare/v0.2.2...v0.4.1
+[0.2.2]: https://github.com/Engccer/hwpx-tomd/compare/v0.2.1...v0.2.2
 [0.2.1]: https://github.com/Engccer/hwpx-tomd/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/Engccer/hwpx-tomd/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/Engccer/hwpx-tomd/releases/tag/v0.1.0

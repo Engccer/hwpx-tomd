@@ -47,5 +47,9 @@ path = "src/hwpx_tomd/_version.py"
 [tool.hatch.build.targets.wheel]
 packages = ["src/hwpx_tomd"]
 
+# .gitignore의 *.hwpx 규칙에 걸리지만 git에 올린 테스트 픽스처를 sdist에 넣는다
+[tool.hatch.build.targets.sdist]
+artifacts = ["tests/fixtures/*.hwpx"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
