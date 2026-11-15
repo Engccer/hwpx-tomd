@@ -1108,3 +1108,35 @@ def test_cli_underline(make_hwpx, capsys):
     code = main([str(make_hwpx(BLANK_P, header_xml=UL_HEADER)), "--stdout", "--underline"])
     assert code == 0
     assert capsys.readouterr().out.strip() == BLANK_EXPECTED
+
+
+# --------------------------------------------------------------------------
+# 단어 recall은 원본도 문단 단위로 run을 이어 센다 (#4)
+# --------------------------------------------------------------------------
+RUN_SPLIT_P = "<hp:p>" + run(0, "학교") + run(1, "에서 공부한다") + "</hp:p>"
+
+
+def test_word_recall_run_boundary_default(make_hwpx):
+    res = convert(make_hwpx(RUN_SPLIT_P, header_xml=UL_HEADER))
+    assert res.recall == 1.0
+    assert res.warnings == []
+
+
+def test_word_recall_run_boundary_underline(make_hwpx):
+    res = convert(make_hwpx(RUN_SPLIT_P, header_xml=UL_HEADER), underline=True)
+    assert "<u>" in res.markdown
+    assert res.recall == 1.0
+    assert res.warnings == []
+
+
+def test_word_recall_blank_run_boundary_underline(make_hwpx):
+    res = convert(make_hwpx(BLANK_P + SPAN_P, header_xml=UL_HEADER), underline=True)
+    assert res.recall == 1.0
+
+
+def test_word_recall_paragraph_boundary_not_joined(make_hwpx):
+    body = "<hp:p>" + run(0, "학교") + "</hp:p><hp:p>" + run(1, "에서") + "</hp:p>"
+    res = convert(make_hwpx(body, header_xml=UL_HEADER))
+    assert res.recall == 1.0
+    # 문단 경계는 이어 붙이지 않으므로 원본 단어 집합도 둘로 센다.
+    assert {"학교", "에서"} <= set(res.markdown.split())

@@ -1033,11 +1033,24 @@ def _render_roots(
     gt_words: set[str] = set()
     src_parts: list[str] = []
     for root in roots:
+        # 단어 집합은 출력과 같은 단위로 센다: 같은 문단(가장 가까운 hp:p) 안의
+        # run 텍스트를 이어 붙인 뒤 분할한다. 문단·표 셀 경계는 잇지 않는다(#4).
+        parent = {c: p for p in root.iter() for c in p}
+        para_key = None
+        para_buf: list[str] = []
         for t in root.iter():
             if localname(t.tag) == "t":
                 txt = t_full_text(t)
-                gt_words |= _words(txt)
                 src_parts.append(txt)
+                node = parent.get(t)
+                while node is not None and localname(node.tag) != "p":
+                    node = parent.get(node)
+                if node is not para_key:
+                    gt_words |= _words("".join(para_buf))
+                    para_buf = []
+                    para_key = node
+                para_buf.append(txt)
+        gt_words |= _words("".join(para_buf))
         for child in root:
             if localname(child.tag) == "p":
                 all_lines += render_block_lines(
@@ -1149,7 +1162,8 @@ def convert(
             "제거된 문자는 텍스트로서 의미가 없어 본문 손실은 없습니다."
         )
     if gt_words:
-        out_words = _words(markdown)
+        # 밑줄 표기(<u> 태그, 빈칸 \\_)는 단어를 끊지 않도록 지우고 센다(원본은 이어 붙여 셈).
+        out_words = _words(re.sub(r"</?u>", "", markdown).replace("\\_", " "))
         recall = len(gt_words & out_words) / len(gt_words)
         if recall < recall_threshold:
             missing = sorted(gt_words - out_words)[:20]
