@@ -1036,21 +1036,47 @@ def _render_roots(
         # 단어 집합은 출력과 같은 단위로 센다: 같은 문단(가장 가까운 hp:p) 안의
         # run 텍스트를 이어 붙인 뒤 분할한다. 문단·표 셀 경계는 잇지 않는다(#4).
         parent = {c: p for p in root.iter() for c in p}
+
+        def nearest_p(node):
+            while node is not None and localname(node.tag) != "p":
+                node = parent.get(node)
+            return node
+
         para_key = None
         para_buf: list[str] = []
-        for t in root.iter():
-            if localname(t.tag) == "t":
-                txt = t_full_text(t)
+
+        def flush_words():
+            nonlocal para_buf
+            gt_words.update(_words("".join(para_buf)))
+            para_buf = []
+
+        def add(node, txt):
+            nonlocal para_key
+            key = nearest_p(parent.get(node))
+            if key is not para_key:
+                flush_words()
+                para_key = key
+            para_buf.append(txt)
+
+        for node in root.iter():
+            tag = localname(node.tag)
+            if tag == "t":
+                txt = t_full_text(node)
                 src_parts.append(txt)
-                node = parent.get(t)
-                while node is not None and localname(node.tag) != "p":
-                    node = parent.get(node)
-                if node is not para_key:
-                    gt_words |= _words("".join(para_buf))
-                    para_buf = []
-                    para_key = node
-                para_buf.append(txt)
-        gt_words |= _words("".join(para_buf))
+                add(node, txt)
+            elif tag == "autoNum":
+                # 렌더러가 본문에 내는 번호 글자(제3장의 3)를 같은 함수로 끼운다.
+                add(node, autonum_text(node))
+            elif tag == "tbl":
+                # 인라인 표는 출력에서 줄을 끊는다.
+                flush_words()
+            elif tag == "pic" and image_ctx is not None:
+                # 그림 참조가 실제로 출력될 때만 줄이 끊긴다.
+                idref = next((sub.get("binaryItemIDRef") for sub in node.iter()
+                              if localname(sub.tag) == "img"), None)
+                if idref and image_ctx.id_to_file.get(idref):
+                    flush_words()
+        flush_words()
         for child in root:
             if localname(child.tag) == "p":
                 all_lines += render_block_lines(
@@ -1162,8 +1188,11 @@ def convert(
             "제거된 문자는 텍스트로서 의미가 없어 본문 손실은 없습니다."
         )
     if gt_words:
-        # 밑줄 표기(<u> 태그, 빈칸 \\_)는 단어를 끊지 않도록 지우고 센다(원본은 이어 붙여 셈).
-        out_words = _words(re.sub(r"</?u>", "", markdown).replace("\\_", " "))
+        out_text = markdown
+        if underline:
+            # 밑줄 표기(<u> 태그, 빈칸 \\_)는 단어를 끊지 않도록 지우고 센다(원본은 이어 붙여 셈).
+            out_text = re.sub(r"</?u>", "", out_text).replace("\\_", " ")
+        out_words = _words(out_text)
         recall = len(gt_words & out_words) / len(gt_words)
         if recall < recall_threshold:
             missing = sorted(gt_words - out_words)[:20]

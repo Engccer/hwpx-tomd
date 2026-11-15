@@ -1129,8 +1129,16 @@ def test_word_recall_run_boundary_underline(make_hwpx):
     assert res.warnings == []
 
 
-def test_word_recall_blank_run_boundary_underline(make_hwpx):
-    res = convert(make_hwpx(BLANK_P + SPAN_P, header_xml=UL_HEADER), underline=True)
+def test_word_recall_run_boundary_underline_across_runs(make_hwpx):
+    body = "<hp:p>" + run(0, "학교") + run(1, "에서") + run(1, "도 공부") + "</hp:p>"
+    res = convert(make_hwpx(body, header_xml=UL_HEADER), underline=True)
+    assert res.recall == 1.0
+    assert res.warnings == []
+
+
+def test_word_recall_literal_u_tag_not_stripped_by_default(make_hwpx):
+    body = "<hp:p>" + run(0, "학교&lt;u&gt;에서") + "</hp:p>"
+    res = convert(make_hwpx(body))
     assert res.recall == 1.0
 
 
@@ -1140,3 +1148,44 @@ def test_word_recall_paragraph_boundary_not_joined(make_hwpx):
     assert res.recall == 1.0
     # 문단 경계는 이어 붙이지 않으므로 원본 단어 집합도 둘로 센다.
     assert {"학교", "에서"} <= set(res.markdown.split())
+
+
+# 원본은 잇는데 출력은 줄을 끊거나 글자를 끼우는 경우는 원본도 같게 센다.
+EMPTY_TBL = (
+    '<hp:run><hp:tbl><hp:tr><hp:tc><hp:cellAddr colAddr="0" rowAddr="0"/>'
+    '<hp:cellSpan colSpan="1" rowSpan="1"/><hp:subList><hp:p><hp:run/></hp:p>'
+    "</hp:subList></hp:tc></hp:tr></hp:tbl></hp:run>"
+)
+PIC = '<hp:run><hp:pic><hp:img binaryItemIDRef="image1"/></hp:pic></hp:run>'
+
+
+def test_word_recall_inline_table_breaks_words(make_hwpx):
+    body = "<hp:p>" + run(0, "학교") + EMPTY_TBL + run(0, "에서") + "</hp:p>"
+    res = convert(make_hwpx(body))
+    assert res.recall == 1.0
+    assert res.warnings == []
+
+
+def test_word_recall_picture_reference_breaks_words(make_hwpx, tmp_path):
+    body = "<hp:p>" + run(0, "학교") + PIC + run(0, "에서") + "</hp:p>"
+    path = make_hwpx(body, bindata={"image1.jpg": b"x"})
+    res = convert(path, image_dir=str(tmp_path / "img"))
+    assert res.recall == 1.0
+    assert not any("recall" in w for w in res.warnings)
+
+
+def test_word_recall_picture_without_reference_keeps_joining(make_hwpx):
+    body = "<hp:p>" + run(0, "학교") + PIC + run(0, "에서") + "</hp:p>"
+    res = convert(make_hwpx(body, bindata={"image1.jpg": b"x"}))
+    assert res.recall == 1.0
+
+
+def test_word_recall_autonum_letters_inserted(make_hwpx):
+    body = (
+        "<hp:p>" + run(0, "제")
+        + '<hp:run><hp:ctrl><hp:autoNum num="3" numType="PICTURE"/></hp:ctrl></hp:run>'
+        + run(0, "장") + "</hp:p>"
+    )
+    res = convert(make_hwpx(body))
+    assert "제3장" in res.markdown
+    assert res.recall == 1.0
