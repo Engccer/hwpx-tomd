@@ -6,6 +6,7 @@
 우리 파서가 실제로 읽는 부분만 채운다:
   - ``Contents/section0.xml``  : 본문(파서가 파싱하는 대상)
   - ``META-INF/manifest.xml``  : 암호화 감지(encryption-data 존재 여부)
+  - ``Contents/header.xml``    : 글자 모양(charPr). 밑줄 시험에서만 넣는다
 """
 
 import zipfile
@@ -52,12 +53,13 @@ def make_hwpx(tmp_path):
         name: 생성할 파일 이름.
         encrypted: True이면 manifest에 encryption-data를 넣어 암호화로 위장한다.
         bindata: {파일명: bytes} 매핑. 각 항목을 BinData/<파일명>으로 zip에 기록(이미지 추출 테스트용).
+        header_xml: 주어지면 ``Contents/header.xml``로 그대로 기록한다(밑줄 테스트용).
 
     Returns:
         생성된 .hwpx 파일의 :class:`pathlib.Path`.
     """
 
-    def _make(body_xml="", *, name="doc.hwpx", encrypted=False, bindata=None):
+    def _make(body_xml="", *, name="doc.hwpx", encrypted=False, bindata=None, header_xml=None):
         path = tmp_path / name
         section_xml = _SEC_HEADER + body_xml + _SEC_FOOTER
         manifest = _ENCRYPTED_MANIFEST if encrypted else _PLAIN_MANIFEST
@@ -65,6 +67,8 @@ def make_hwpx(tmp_path):
             zf.writestr("mimetype", "application/hwp+zip")
             zf.writestr("META-INF/manifest.xml", manifest)
             zf.writestr("Contents/section0.xml", section_xml)
+            if header_xml is not None:
+                zf.writestr("Contents/header.xml", header_xml)
             for fname, data in (bindata or {}).items():
                 zf.writestr(f"BinData/{fname}", data)
         return path

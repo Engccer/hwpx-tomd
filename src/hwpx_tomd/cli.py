@@ -33,6 +33,7 @@ def build_parser() -> argparse.ArgumentParser:
             "  hwpx-tomd doc.hwpx --stdout         # 표준출력 (파이프용)\n"
             "  hwpx-tomd doc.hwpx --cell-br        # 표 셀 내부 문단을 <br>로 구분\n"
             "  hwpx-tomd doc.hwpx --merge-fill     # 표 병합 칸을 같은 값으로 채움\n"
+            "  hwpx-tomd doc.hwpx --underline      # 밑줄 구간·빈칸 보존\n"
         ),
     )
     parser.add_argument("file", help="입력 HWPX 파일 경로")
@@ -67,6 +68,12 @@ def build_parser() -> argparse.ArgumentParser:
         "--prune-empty",
         action="store_true",
         help="전부 빈 행·열을 표에서 지움 (레이아웃용 빈 칸이 만드는 5열 참고 박스 등)",
+    )
+    parser.add_argument(
+        "--underline",
+        action="store_true",
+        help="밑줄 글자를 <u>…</u>로 감싸고 공백뿐인 밑줄(기입용 빈칸)을 같은 길이의 \\_로 냄 "
+        "(양식·계약서·평가지 등 밑줄이 의미를 갖는 문서용)",
     )
     parser.add_argument(
         "--image-dir",
@@ -106,6 +113,7 @@ def main(argv: list[str] | None = None) -> int:
             cell_br=args.cell_br,
             merge_fill="vertical" if args.merge_fill_vertical else args.merge_fill,
             prune_empty=args.prune_empty,
+            underline=args.underline,
             image_dir=args.image_dir,
             image_ref_prefix=args.image_prefix,
         )

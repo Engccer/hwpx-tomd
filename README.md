@@ -13,6 +13,7 @@ HWPX(한컴오피스 한글) 문서를 외부 API 없이 **로컬에서 Markdown
 - **객관식 마커 보존 가드**: ①②③ 같은 선택지 마커가 렌더링 중 하나라도 빠지면 임계값과 무관하게 경고합니다(시험 문항 무결성).
 - **이미지 존재 경고**: 본문에 그림이 있으면 그 개수를 알리고, 그래픽에 박힌 텍스트가 누락될 수 있음을 경고합니다.
 - **병합 칸 채우기 옵션**: `merge_fill=True`로 병합 셀 값을 모든 칸에 채워 행 단위 파싱·LLM 입력에 맞춥니다.
+- **밑줄 보존 옵션**: `underline=True`로 밑줄 구간을 `<u>…</u>`로, 기입용 빈칸(공백뿐인 밑줄)을 같은 길이의 `\_`로 냅니다. 밑줄 표기가 렌더링 중 줄면 경고합니다.
 - **암호화 감지**: AES 암호화 HWPX를 자동 감지하고 복호화 방법을 안내합니다.
 - **변환본 제어문자 복구**: hwp2hwpx로 만든 HWPX는 하이퍼링크 필드에 XML 1.0 불법 제어문자(NUL 패딩 등)가 남아 파싱이 중단되는 일이 있습니다. 이 경우 해당 문자만 제거하고 다시 파싱하며 경고를 남깁니다(본문 손실 없음).
 - **선택 XML 파서**: 설치된 `lxml`을 우선 사용하고, 없거나 불러오지 못하면 표준 라이브러리 `xml.etree.ElementTree`를 사용합니다. `python-hwpx`는 필요하지 않습니다.
@@ -48,6 +49,7 @@ from hwpx_tomd import to_markdown, convert, HwpxEncryptedError
 md = to_markdown("file.hwpx")
 md = to_markdown("file.hwpx", cell_br=True)     # 셀 내부 문단을 <br>로 구분
 md = to_markdown("file.hwpx", merge_fill=True)  # 병합 칸을 같은 값으로 채움
+md = to_markdown("file.hwpx", underline=True)   # 밑줄 구간·빈칸 보존
 
 # 2) 자가검증 결과까지: ConversionResult
 result = convert("file.hwpx")
@@ -80,6 +82,16 @@ except HwpxEncryptedError as e:
 
 기본값(`merge_fill=False`)은 표 병합으로 덮인 칸을 빈 칸으로 두어 GFM 열 정렬을 보존합니다. `merge_fill=True`이면 병합 시작 칸의 값을 덮인 칸에도 채워, 모든 행이 자족적이 됩니다(정보량은 동일). 교육과정·평가계획처럼 머리 셀이 세로로 길게 병합된 표를 **행 단위로 읽거나 LLM에 입력**할 때 유용합니다.
 
+### `underline` 옵션
+
+양식·계약서·평가지처럼 밑줄이 의미를 갖는 문서용입니다. `underline=True`이면 `header.xml`에서 밑줄(`type`이 `NONE`이 아님. 윗줄 `TOP`·가운데줄 `CENTER` 포함)이 걸린 글자 모양을 쓰는 run을 `<u>…</u>`로 감쌉니다(GFM에서 렌더됨). 서식 경계로 나뉜 연속 밑줄 run은 한 구간으로 감쌉니다. 공백만 담긴 밑줄 run은 기입용 빈칸이므로 같은 길이의 `\_`로 냅니다(밑줄 문구 사이의 공백 한 칸은 단어 공백으로 두고, 밑줄 문구 바로 뒤에 이어진 공백 run은 두 칸 이상일 때 빈칸으로 봅니다). 글자와 같은 run 안에 붙은 앞뒤 공백은 빈칸으로 보지 않고 종전처럼 정규화됩니다.
+
+```markdown
+계약 기간은 \_\_\_\_\_\_년 \_\_\_\_\_\_월까지로 한다.
+```
+
+밑줄 보존 가드가 함께 켜져, 원본 밑줄 run의 글자나 빈칸 길이가 출력의 밑줄 표기에서 줄면 경고합니다. 기본값(`underline=False`)은 종전과 같은 출력이며, 밑줄이 의미 없는 문서에서 태그가 잡음이 되지 않게 옵트인으로 두었습니다.
+
 ## CLI 사용법
 
 ```bash
@@ -88,6 +100,7 @@ hwpx-tomd file.hwpx -o out.md    # 출력 경로 지정
 hwpx-tomd file.hwpx --stdout     # 표준출력 (파이프용)
 hwpx-tomd file.hwpx --cell-br    # 표 셀 내부 문단을 <br>로 구분
 hwpx-tomd file.hwpx --merge-fill # 표 병합 칸을 같은 값으로 채움
+hwpx-tomd file.hwpx --underline  # 밑줄 구간·빈칸 보존
 ```
 
 종료 코드: `0` 성공, `1` 일반 오류, `2` 잘못된 인자/파일 없음, `3` 암호화된 HWPX.
@@ -113,7 +126,7 @@ WMF 등 비래스터는 추출하되 image_map에서 ocr_eligible=false로 표�
 
 ## 범위
 
-- **In scope (읽기 전용)**: HWPX → Markdown/텍스트, 표 그리드 배치, 병합 칸 채우기 옵션, 글상자 수집, tail 보존, 자가검증(단어 recall · 글자 멀티셋 recall · 마커 보존 가드), 이미지 존재 경고, 암호화 감지·안내, 불법 제어문자 복구.
+- **In scope (읽기 전용)**: HWPX → Markdown/텍스트, 표 그리드 배치, 병합 칸 채우기 옵션, 글상자 수집, tail 보존, 자가검증(단어 recall · 글자 멀티셋 recall · 마커 보존 가드 · 밑줄 보존 가드), 이미지 존재 경고, 암호화 감지·안내, 불법 제어문자 복구.
 - **Out of scope**: HWPX 편집, HWP(구형 바이너리) 직접 처리, 암호 해제, **이미지 내 텍스트 OCR**, 표의 구조화 데이터 반환(추후 검토).
 
 HWP(구형 바이너리)는 먼저 HWPX로 변환한 뒤 입력하세요. HWPX 편집이 필요하면 별도 도구를 사용하세요.

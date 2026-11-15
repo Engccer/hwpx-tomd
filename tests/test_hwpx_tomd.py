@@ -22,6 +22,7 @@ from hwpx_tomd.core import (
     _char_counts,
     _marker_counts,
     _multiset_recall,
+    _underline_loss,
 )
 
 
@@ -877,3 +878,233 @@ def test_hoisted_table_caption_kept(make_hwpx):
     md = to_markdown(make_hwpx(body))
     assert "[표 2] 자격기준" in md
     assert md.index("| 지원유형 | 자격기준 |") < md.index("[표 2] 자격기준")
+
+
+# --------------------------------------------------------------------------
+# 밑줄(hh:underline) 보존 (#3): 옵트인 underline=True / CLI --underline
+# --------------------------------------------------------------------------
+def ul_header(*charprs):
+    """charPr (id, 밑줄 type) 목록으로 header.xml을 만든다."""
+    body = "".join(
+        f'<hh:charPr id="{cid}" height="1000">'
+        f'<hh:underline type="{utype}" shape="SOLID" color="#000000"/>'
+        "</hh:charPr>"
+        for cid, utype in charprs
+    )
+    return (
+        '<?xml version="1.0" encoding="UTF-8"?>\n'
+        '<hh:head xmlns:hh="http://www.hancom.co.kr/hwpml/2011/head">'
+        f'<hh:refList><hh:charProperties itemCnt="{len(charprs)}">{body}'
+        "</hh:charProperties></hh:refList></hh:head>"
+    )
+
+
+# 0: 밑줄 없음, 1: 밑줄(BOTTOM), 2: 명시적 NONE
+UL_HEADER = ul_header((0, "NONE"), (1, "BOTTOM"), (2, "NONE"))
+
+
+def run(cid, text):
+    return f'<hp:run charPrIDRef="{cid}"><hp:t>{text}</hp:t></hp:run>'
+
+
+# 이슈 #3 재현: 공백뿐인 밑줄 run이 기입용 빈칸이다.
+BLANK_P = (
+    "<hp:p>"
+    + run(0, "계약 기간은 ")
+    + run(1, "      ")
+    + run(0, "년 ")
+    + run(1, "      ")
+    + run(0, "월까지로 한다.")
+    + "</hp:p>"
+)
+
+# 본문 중간의 밑줄 구간(서식 경계로 두 run에 나뉨)
+SPAN_P = (
+    "<hp:p>"
+    + run(0, "(A) ")
+    + run(1, "밑줄 친")
+    + run(1, " 부분")
+    + run(0, " 중에서 고르시오.")
+    + "</hp:p>"
+)
+
+BLANK_EXPECTED = "계약 기간은 " + "\\_" * 6 + "년 " + "\\_" * 6 + "월까지로 한다."
+
+
+def test_underline_default_unchanged(make_hwpx):
+    path = make_hwpx(BLANK_P + SPAN_P, header_xml=UL_HEADER)
+    res = convert(path)
+    assert "<u>" not in res.markdown and "\\_" not in res.markdown
+    assert "계약 기간은 년 월까지로 한다." in res.markdown
+    assert res.warnings == []
+
+
+def test_underline_blank_run_preserved(make_hwpx):
+    md = to_markdown(make_hwpx(BLANK_P, header_xml=UL_HEADER), underline=True)
+    assert md == BLANK_EXPECTED
+
+
+def test_underline_span_wrapped_and_merged(make_hwpx):
+    md = to_markdown(make_hwpx(SPAN_P, header_xml=UL_HEADER), underline=True)
+    assert md == "(A) <u>밑줄 친 부분</u> 중에서 고르시오."
+
+
+def test_underline_adjacent_runs_merge(make_hwpx):
+    body = "<hp:p>" + run(0, "앞 ") + run(1, "밑줄") + run(1, "친") + run(0, " 뒤") + "</hp:p>"
+    md = to_markdown(make_hwpx(body, header_xml=UL_HEADER), underline=True)
+    assert md == "앞 <u>밑줄친</u> 뒤"
+
+
+def test_underline_type_none_not_wrapped(make_hwpx):
+    body = "<hp:p>" + run(2, "보통") + run(2, "   ") + run(0, "글") + "</hp:p>"
+    md = to_markdown(make_hwpx(body, header_xml=UL_HEADER), underline=True)
+    assert md == "보통 글"
+
+
+def test_underline_in_table_cell(make_hwpx):
+    cell = (
+        "<hp:tc>"
+        '<hp:cellAddr colAddr="0" rowAddr="0"/>'
+        '<hp:cellSpan colSpan="1" rowSpan="1"/>'
+        "<hp:subList><hp:p>" + run(0, "성명 ") + run(1, "    ") + run(1, "강조") + "</hp:p></hp:subList>"
+        "</hp:tc>"
+    )
+    body = f"<hp:p><hp:run><hp:tbl><hp:tr>{cell}</hp:tr></hp:tbl></hp:run></hp:p>"
+    md = to_markdown(make_hwpx(body, header_xml=UL_HEADER), underline=True)
+    assert "| 성명 " + "\\_" * 4 + "<u>강조</u> |" in md
+
+
+def test_underline_in_drawtext(make_hwpx):
+    body = (
+        "<hp:p><hp:run charPrIDRef=\"0\"><hp:rect><hp:drawText><hp:subList>"
+        "<hp:p>" + run(1, "글상자 밑줄") + "</hp:p>"
+        "</hp:subList></hp:drawText></hp:rect></hp:run></hp:p>"
+    )
+    md = to_markdown(make_hwpx(body, header_xml=UL_HEADER), underline=True)
+    assert md == "<u>글상자 밑줄</u>"
+
+
+def test_underline_without_header_is_noop(make_hwpx):
+    res = convert(make_hwpx(BLANK_P), underline=True)
+    assert res.markdown == "계약 기간은 년 월까지로 한다."
+    assert res.warnings == []
+
+
+def test_underline_recall_unaffected(make_hwpx):
+    res = convert(make_hwpx(BLANK_P + SPAN_P, header_xml=UL_HEADER), underline=True)
+    assert res.recall == 1.0 and res.char_recall == 1.0
+    assert res.warnings == []
+
+
+def test_underline_single_space_between_spans_is_word_space(make_hwpx):
+    body = "<hp:p>" + run(1, "중요") + run(1, " ") + run(1, "내용") + run(0, " 확인") + "</hp:p>"
+    md = to_markdown(make_hwpx(body, header_xml=UL_HEADER), underline=True)
+    assert md == "<u>중요 내용</u> 확인"
+
+
+def test_underline_label_then_blank_in_one_group(make_hwpx):
+    body = "<hp:p>" + run(1, "성명") + run(1, "    ") + run(0, " (서명)") + "</hp:p>"
+    md = to_markdown(make_hwpx(body, header_xml=UL_HEADER), underline=True)
+    assert md == "<u>성명</u>" + "\\_" * 4 + " (서명)"
+
+
+def test_underline_multiple_t_in_one_run(make_hwpx):
+    body = '<hp:p><hp:run charPrIDRef="1"><hp:t>계약 </hp:t><hp:t>기간</hp:t></hp:run></hp:p>'
+    md = to_markdown(make_hwpx(body, header_xml=UL_HEADER), underline=True)
+    assert md == "<u>계약 기간</u>"
+
+
+def test_default_keeps_literal_u_tags_in_text(make_hwpx):
+    """원문에 태그 모양 글자가 있어도 기본값은 0.4.1처럼 그대로 낸다."""
+    path = make_hwpx(p("태그 &lt;/u&gt;&lt;u&gt; 예시"), header_xml=UL_HEADER)
+    res = convert(path)
+    assert res.markdown == "태그 </u><u> 예시"
+    assert res.warnings == []
+
+
+def test_underline_in_caption(make_hwpx):
+    body = (
+        "<hp:p><hp:run><hp:tbl>"
+        '<hp:caption side="TOP"><hp:subList><hp:p>' + run(0, "표 ") + run(1, "제목") + "</hp:p></hp:subList></hp:caption>"
+        + "<hp:tr>" + tc(0, 0, "칸") + "</hp:tr>"
+        "</hp:tbl></hp:run></hp:p>"
+    )
+    md = to_markdown(make_hwpx(body, header_xml=UL_HEADER), underline=True)
+    assert md.splitlines()[0] == "표 <u>제목</u>"
+
+
+def test_underline_with_cell_br(make_hwpx):
+    cell = (
+        "<hp:tc>"
+        '<hp:cellAddr colAddr="0" rowAddr="0"/>'
+        '<hp:cellSpan colSpan="1" rowSpan="1"/>'
+        "<hp:subList><hp:p>" + run(1, "첫째") + "</hp:p><hp:p>" + run(1, "   ") + "</hp:p></hp:subList>"
+        "</hp:tc>"
+    )
+    body = f"<hp:p><hp:run><hp:tbl><hp:tr>{cell}</hp:tr></hp:tbl></hp:run></hp:p>"
+    md = to_markdown(make_hwpx(body, header_xml=UL_HEADER), underline=True, cell_br=True)
+    assert "| <u>첫째</u><br>" + "\\_" * 3 + " |" in md
+
+
+def test_underline_header_with_nul_recovered(make_hwpx):
+    header = UL_HEADER.replace("<hh:refList>", "<hh:refList>\x00")
+    md = to_markdown(make_hwpx(BLANK_P, header_xml=header), underline=True)
+    assert md == BLANK_EXPECTED
+
+
+def test_underline_broken_header_warns(make_hwpx):
+    res = convert(make_hwpx(BLANK_P, header_xml="<hh:head"), underline=True)
+    assert res.markdown == "계약 기간은 년 월까지로 한다."
+    assert any("header.xml" in w for w in res.warnings)
+
+
+def test_underline_blank_split_by_control_kept(make_hwpx):
+    """누름틀 등 컨트롤로 한 run의 공백이 <hp:t> 여럿에 나뉘어도 run 단위로 빈칸을 판정한다."""
+    body = (
+        "<hp:p>" + run(1, "성명")
+        + '<hp:run charPrIDRef="1"><hp:t> </hp:t><hp:ctrl><hp:fieldBegin type="CLICK_HERE"/></hp:ctrl>'
+        "<hp:t>  </hp:t><hp:ctrl><hp:fieldEnd/></hp:ctrl><hp:t> </hp:t></hp:run>"
+        + "</hp:p>"
+    )
+    res = convert(make_hwpx(body, header_xml=UL_HEADER), underline=True)
+    assert res.markdown == "<u>성명</u>" + "\\_" * 4
+    assert res.warnings == []
+
+
+def test_underline_with_merge_fill_and_prune(make_hwpx):
+    rows = (
+        "<hp:tr>" + tc(0, 0, "머리", rowspan=2) + tc(1, 0, "값") + "</hp:tr>"
+        "<hp:tr>" + tc(1, 1, "둘") + "</hp:tr>"
+    ).replace("<hp:run><hp:t>머리", '<hp:run charPrIDRef="1"><hp:t>머리')
+    body = f"<hp:p><hp:run><hp:tbl>{rows}</hp:tbl></hp:run></hp:p>"
+    md = to_markdown(make_hwpx(body, header_xml=UL_HEADER), underline=True,
+                     merge_fill=True, prune_empty=True)
+    lines = md.strip().splitlines()
+    assert lines[0] == "| <u>머리</u> | 값 |"
+    assert lines[2] == "| <u>머리</u> | 둘 |"
+
+
+def test_underline_guard_fires_in_convert(make_hwpx, monkeypatch):
+    """렌더 경로가 밑줄 표기를 잃으면 convert 결과에 경고가 담긴다."""
+    import hwpx_tomd.core as core
+
+    def lossy_join(buf):  # 밑줄 조각을 평문으로 잇는 망가진 렌더 경로
+        return " ".join("".join(x if isinstance(x, str) else x[0] for x in buf).split())
+
+    monkeypatch.setattr(core, "_join_buf", lossy_join)
+    res = convert(make_hwpx(BLANK_P + SPAN_P, header_xml=UL_HEADER), underline=True)
+    assert any("밑줄 표시가 렌더링 중 누락" in w for w in res.warnings)
+
+
+def test_underline_guard_fires_on_loss():
+    src = [["밑줄 친"], ["      "]]
+    assert _underline_loss(src, "(A) <u>밑줄 친</u> " + "\\_" * 6) is None
+    assert "밑줄" in _underline_loss(src, "(A) 밑줄 친 " + "\\_" * 6)
+    assert "빈칸" in _underline_loss(src, "(A) <u>밑줄 친</u>")
+    assert _underline_loss([], "본문") is None
+
+
+def test_cli_underline(make_hwpx, capsys):
+    code = main([str(make_hwpx(BLANK_P, header_xml=UL_HEADER)), "--stdout", "--underline"])
+    assert code == 0
+    assert capsys.readouterr().out.strip() == BLANK_EXPECTED

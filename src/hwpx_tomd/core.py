@@ -104,6 +104,74 @@ _CHAR_RE = re.compile(r"[가-힣A-Za-z0-9]")
 # 임계값과 무관하게 정확히 경고한다. 33개 실문서에서 손실 0으로 오탐 없음 확인.
 _MARKER_RE = re.compile(r"[①-⓿]")
 
+# underline=True일 때 밑줄 구간 표기. 내용은 <u>…</u>(GFM이 렌더하는 HTML), 기입용 빈칸은
+# 공백 정규화에 지워지지 않도록 같은 길이의 이스케이프 밑줄(\_)로 바꾼다.
+_UL_BLANK = "\\_"
+_UL_SPAN_RE = re.compile(r"<u>(.*?)</u>")
+
+
+def _format_ul_group(items: "list[str]") -> str:
+    """연속된 밑줄 조각(서식 경계로 나뉜 run들의 텍스트)을 한 번에 Markdown 표기로 바꾼다.
+
+    그룹 전체가 공백이면 기입용 빈칸이라 공백 수만큼 ``\\_``로 낸다. 내용이 있으면 공백뿐인
+    조각 중 두 칸 이상만 빈칸으로 보고(「성명」 뒤의 기입란), 한 칸짜리는 밑줄 문구 사이의
+    단어 공백으로 둔다(「중요 내용」). 나머지는 ``<u>…</u>`` 하나로 감싸고 앞뒤 공백은 태그 밖에 둔다.
+    """
+    joined = "".join(items)
+    if not joined.strip():
+        return _UL_BLANK * len(joined)
+    out: list[str] = []
+    seg: list[str] = []
+
+    def close():
+        s = "".join(seg)
+        seg.clear()
+        core = s.strip()
+        if not core:
+            out.append(s)
+            return
+        lead = s[: len(s) - len(s.lstrip())]
+        trail = s[len(s.rstrip()):]
+        out.append(f"{lead}<u>{core}</u>{trail}")
+
+    for it in items:
+        if len(it) >= 2 and not it.strip():
+            close()
+            out.append(_UL_BLANK * len(it))
+        else:
+            seg.append(it)
+    close()
+    return "".join(out)
+
+
+def _join_buf(buf: list) -> str:
+    """문단 버퍼를 원문 그대로 잇고 공백을 정규화한다.
+
+    밑줄 조각은 ``(텍스트, run 식별자)``로 들어 있고, 연속된 것끼리 모아 :func:`_format_ul_group`으로
+    한 번만 표기한다. 한 run이 누름틀 등 컨트롤로 ``<hp:t>`` 여러 개에 나뉘어도 빈칸 판정은 run
+    단위로 하도록 같은 run의 조각은 먼저 잇는다. 원문 글자는 치환하지 않으므로
+    ``underline=False``이면 종전과 같다.
+    """
+    out: list[str] = []
+    group: list[str] = []
+    last_run = None
+    for x in buf:
+        if isinstance(x, tuple):
+            if group and x[1] == last_run:
+                group[-1] += x[0]
+            else:
+                group.append(x[0])
+            last_run = x[1]
+        elif x:
+            if group:
+                out.append(_format_ul_group(group))
+                group = []
+            last_run = None
+            out.append(x)
+    if group:
+        out.append(_format_ul_group(group))
+    return " ".join("".join(out).split())
+
 
 class HwpxError(Exception):
     """hwpx_tomd가 발생시키는 모든 오류의 기반 클래스."""
@@ -270,20 +338,27 @@ def arrow_text(cell) -> str:
     return ""
 
 
-def render_cell_lines(cell, hoisted: "list | None" = None) -> list[str]:
+def render_cell_lines(
+    cell, hoisted: "list | None" = None, underline_ids: "frozenset[str] | None" = None
+) -> list[str]:
     """표 셀 안의 텍스트를 문단별 라인 리스트로 추출(reading order 근사).
 
     글상자(drawText)까지 진입하고 tail 텍스트를 보존하며 자동 번호 필드를 글자로 푼다.
     중첩표(셀 안의 표)는 ``hoisted``가 주어지면 거기에 모아 두고(바깥 표 뒤에 별도 표로
     렌더), 없으면 종전대로 문단 경계를 지키며 평탄화한다. 텍스트가 전혀 없는 셀에
-    화살표 선 도형만 있으면 화살표 글자 한 줄을 돌려준다.
+    화살표 선 도형만 있으면 화살표 글자 한 줄을 돌려준다. ``underline_ids``가 주어지면 그
+    charPr을 참조하는 run을 밑줄 표기(:func:`_format_ul_group`)로 낸다.
     """
     lines: list[str] = []
     buf: list[str] = []
+    ul: list = []  # 지금 들어와 있는 run들의 밑줄 run 식별자(아니면 None). 글상자 안 run이 겹칠 수 있어 스택
+
+    def text_of(raw: str):
+        return (raw, ul[-1]) if ul and ul[-1] is not None else raw
 
     def flush():
         if buf:
-            s = " ".join("".join(x for x in buf if x).split())
+            s = _join_buf(buf)
             if s:
                 lines.append(s)
             buf.clear()
@@ -295,10 +370,14 @@ def render_cell_lines(cell, hoisted: "list | None" = None) -> list[str]:
                 flush()
                 rec(child)
                 flush()
+            elif tag == "run" and underline_ids:
+                ul.append(id(child) if child.get("charPrIDRef") in underline_ids else None)
+                rec(child)
+                ul.pop()
             elif tag == "t":
-                buf.append(t_full_text(child))
+                buf.append(text_of(t_full_text(child)))
             elif tag == "autoNum":
-                buf.append(autonum_text(child))
+                buf.append(text_of(autonum_text(child)))
             elif tag == "tbl":
                 flush()
                 if hoisted is not None:
@@ -320,17 +399,17 @@ def render_cell_lines(cell, hoisted: "list | None" = None) -> list[str]:
     return lines
 
 
-def caption_lines(obj) -> "tuple[str | None, list[str]]":
+def caption_lines(obj, underline_ids=None) -> "tuple[str | None, list[str]]":
     """표·그림 개체의 <hp:caption>(있으면) → (side, 캡션 줄 목록). 캡션은 본문이다."""
     for c in obj:
         if localname(c.tag) == "caption":
-            return (c.get("side") or "BOTTOM").upper(), render_cell_lines(c)
+            return (c.get("side") or "BOTTOM").upper(), render_cell_lines(c, underline_ids=underline_ids)
     return None, []
 
 
-def with_caption(md: str, obj) -> str:
+def with_caption(md: str, obj, underline_ids=None) -> str:
     """표 Markdown 앞뒤에 그 표 자신의 캡션을 붙인다(side=TOP이면 앞, 그 밖은 뒤)."""
-    side, caps = caption_lines(obj)
+    side, caps = caption_lines(obj, underline_ids)
     if not caps:
         return md
     return "\n".join(caps + [md]) if side == "TOP" else "\n".join([md] + caps)
@@ -416,7 +495,8 @@ def table_to_markdown(
 
 
 def render_table_md(
-    tbl, cell_br: bool = False, merge_fill: MergeFill = False, prune_empty: bool = False
+    tbl, cell_br: bool = False, merge_fill: MergeFill = False, prune_empty: bool = False,
+    underline_ids: "frozenset[str] | None" = None,
 ) -> str:
     """표를 Markdown으로 변환한다.
 
@@ -441,14 +521,15 @@ def render_table_md(
     hoisted: list = []
 
     def cell_text(cell):
-        return sep.join(render_cell_lines(cell, hoisted)).replace("|", "\\|")
+        return sep.join(render_cell_lines(cell, hoisted, underline_ids)).replace("|", "\\|")
 
     def with_hoisted(md: str) -> str:
         parts = [md] if md else []
         for inner in hoisted:
-            inner_md = render_table_md(inner, cell_br=cell_br, merge_fill=merge_fill, prune_empty=prune_empty)
+            inner_md = render_table_md(inner, cell_br=cell_br, merge_fill=merge_fill,
+                                       prune_empty=prune_empty, underline_ids=underline_ids)
             if inner_md:
-                parts.append(with_caption(inner_md, inner))  # 호이스팅된 표의 캡션도 함께
+                parts.append(with_caption(inner_md, inner, underline_ids))  # 호이스팅된 표의 캡션도 함께
         return "\n\n".join(parts)
 
     cells = []
@@ -521,7 +602,7 @@ def render_table_md(
 
 def render_block_lines(
     para, cell_br: bool = False, merge_fill: MergeFill = False, image_ctx=None,
-    prune_empty: bool = False,
+    prune_empty: bool = False, underline_ids: "frozenset[str] | None" = None,
 ) -> list[str]:
     """최상위 문단을 reading order로 순회하며 라인 리스트를 생성한다.
 
@@ -531,24 +612,29 @@ def render_block_lines(
     재방문하지 않아 본문/표 텍스트 중복을 막는다.
 
     ``merge_fill``은 표 병합 칸 채우기 옵션으로 :func:`render_table_md`에 전달된다.
+    ``underline_ids``는 밑줄 charPr id 집합이다(:func:`render_cell_lines`와 같은 방식).
     """
     lines: list[str] = []
     buf: list[str] = []
+    ul: list = []
+
+    def text_of(raw: str):
+        return (raw, ul[-1]) if ul and ul[-1] is not None else raw
 
     def flush():
         if buf:
-            s = " ".join("".join(x for x in buf if x).split())
+            s = _join_buf(buf)
             if s:
                 lines.append(s)
             buf.clear()
 
     def caption_of(obj):
         """개체의 캡션. 1×1 래퍼 표면 실제로 렌더되는 안쪽 표의 캡션까지 본다(래퍼·안쪽 둘 다 있으면 순서대로)."""
-        side, caps = caption_lines(obj)
+        side, caps = caption_lines(obj, underline_ids)
         if localname(obj.tag) == "tbl":
             inner = unwrap_wrapper_table(obj)
             if inner is not obj:
-                iside, icaps = caption_lines(inner)
+                iside, icaps = caption_lines(inner, underline_ids)
                 if icaps:
                     side, caps = (side or iside), caps + icaps
         return side, caps
@@ -558,7 +644,8 @@ def render_block_lines(
             tag = localname(child.tag)
             if tag == "tbl":
                 flush()
-                md = render_table_md(child, cell_br=cell_br, merge_fill=merge_fill, prune_empty=prune_empty)
+                md = render_table_md(child, cell_br=cell_br, merge_fill=merge_fill,
+                                     prune_empty=prune_empty, underline_ids=underline_ids)
                 side, caps = caption_of(child)
                 if side == "TOP":
                     lines.extend(caps)
@@ -589,10 +676,14 @@ def render_block_lines(
                 flush()
                 rec(child)
                 flush()
+            elif tag == "run" and underline_ids:
+                ul.append(id(child) if child.get("charPrIDRef") in underline_ids else None)
+                rec(child)
+                ul.pop()
             elif tag == "t":
-                buf.append(t_full_text(child))
+                buf.append(text_of(t_full_text(child)))
             elif tag == "autoNum":
-                buf.append(autonum_text(child))
+                buf.append(text_of(autonum_text(child)))
             else:
                 rec(child)
 
@@ -626,6 +717,83 @@ def _multiset_recall(src: "Counter[str]", out: "Counter[str]") -> float:
         return 1.0
     matched = sum(min(n, out.get(c, 0)) for c, n in src.items())
     return matched / total
+
+
+def _read_underline_ids(filepath: PathLike) -> "tuple[frozenset[str], str | None]":
+    """``Contents/header.xml``에서 밑줄(``<hh:underline type != NONE>``) charPr id 집합을 읽는다.
+
+    header가 없으면 빈 집합(밑줄 없음). 불법 제어문자를 지우고도 파싱할 수 없으면 본문 변환은 계속하고
+    두 번째 값으로 경고 문구를 돌려준다(밑줄은 선택 기능이라 변환 전체를 멈추지 않는다).
+    """
+    with zipfile.ZipFile(filepath, "r") as zf:
+        if "Contents/header.xml" not in zf.namelist():
+            return frozenset(), None
+        raw = zf.read("Contents/header.xml")
+    try:
+        head = _parse_section_xml(raw)
+    except _XML_PARSE_ERROR as exc:
+        try:  # 본문과 같은 불법 제어문자 복구를 한 번 시도한다
+            head = _parse_section_xml(_ILLEGAL_XML_BYTES.sub(b"", raw))
+        except _XML_PARSE_ERROR:
+            return frozenset(), f"header.xml을 읽지 못해 밑줄을 표시하지 못했습니다: {exc}"
+    ids = set()
+    for cp in head.iter():
+        if localname(cp.tag) != "charPr" or cp.get("id") is None:
+            continue
+        for sub in cp:
+            if localname(sub.tag) == "underline" and (sub.get("type") or "NONE").upper() != "NONE":
+                ids.add(cp.get("id"))
+    return frozenset(ids), None
+
+
+def _underline_source(roots, underline_ids: "frozenset[str]") -> "list[list[str]]":
+    """문단마다 연속된 밑줄 run(직속 ``<hp:t>`` 텍스트)의 그룹 목록. 가드의 기대값 계산용.
+
+    텍스트 없는 보통 run(컨트롤만 담은 run 등)은 렌더러처럼 그룹을 끊지 않는다.
+    """
+    groups: list[list[str]] = []
+    for root in roots:
+        for para in root.iter():
+            if localname(para.tag) != "p":
+                continue
+            group: list[str] = []
+            for r in para:
+                if localname(r.tag) != "run":
+                    continue
+                text = "".join(t_full_text(c) for c in r if localname(c.tag) == "t")
+                if r.get("charPrIDRef") in underline_ids:
+                    group.append(text)
+                elif text and group:
+                    groups.append(group)
+                    group = []
+            if group:
+                groups.append(group)
+    return [g for g in groups if "".join(g)]
+
+
+def _underline_loss(src_groups: "list[list[str]]", markdown: str) -> "str | None":
+    """밑줄 보존 가드: 원본 밑줄 그룹의 글자·빈칸이 출력의 밑줄 표기에서 줄었으면 경고 문구.
+
+    원본 그룹을 :func:`_format_ul_group`으로 표기한 기대값과 출력을 비교한다. 내용 글자는
+    ``<u>…</u>`` 안의 글자 멀티셋, 빈칸은 ``\\_`` 개수다. recall 3종은 공백과 표기를 세지 않아
+    이 손실을 못 본다.
+    """
+    expected = "".join(_format_ul_group(g) for g in src_groups)
+    src = _char_counts("".join(_UL_SPAN_RE.findall(expected)))
+    out = _char_counts("".join(_UL_SPAN_RE.findall(markdown)))
+    lost_chars = sum((src - out).values())
+    lost_blanks = expected.count(_UL_BLANK) - markdown.count(_UL_BLANK)
+    parts = []
+    if lost_chars > 0:
+        parts.append(f"밑줄 글자 {lost_chars}자")
+    if lost_blanks > 0:
+        parts.append(f"밑줄 빈칸 {lost_blanks}칸")
+    if not parts:
+        return None
+    return (
+        "밑줄 표시가 렌더링 중 누락되었습니다: " + ", ".join(parts)
+        + ". 밑줄 구간이나 기입용 빈칸이 평문으로 바뀌었을 수 있으니 확인하세요."
+    )
 
 
 def count_images(roots) -> int:
@@ -855,7 +1023,7 @@ def _read_section_roots(filepath: PathLike) -> "tuple[list, dict[str, int]]":
 
 def _render_roots(
     roots, cell_br: bool, merge_fill: MergeFill = False, image_ctx=None,
-    prune_empty: bool = False,
+    prune_empty: bool = False, underline_ids: "frozenset[str] | None" = None,
 ) -> tuple[str, set[str], str]:
     """section root들을 (Markdown 문자열, 원본 단어 집합, 원본 ``<hp:t>`` 텍스트)로 변환.
 
@@ -875,6 +1043,7 @@ def _render_roots(
                 all_lines += render_block_lines(
                     child, cell_br=cell_br, merge_fill=merge_fill,
                     image_ctx=image_ctx, prune_empty=prune_empty,
+                    underline_ids=underline_ids,
                 )
 
     # 연속 빈 줄 정리
@@ -901,6 +1070,7 @@ def convert(
     image_dir: "str | None" = None,
     image_ref_prefix: str = "",
     prune_empty: bool = False,
+    underline: bool = False,
 ) -> ConversionResult:
     """HWPX를 Markdown으로 변환하고 자가검증 결과를 함께 반환한다.
 
@@ -910,6 +1080,7 @@ def convert(
     단어 집합 recall, 글자 멀티셋 recall(:attr:`ConversionResult.char_recall`),
     그리고 객관식 마커 보존 가드. 앞 둘은 ``recall_threshold`` 미만이면 경고를,
     마커 가드는 마커가 하나라도 줄면(임계값 무관) 경고를 결과에 담는다.
+    ``underline=True``이면 밑줄 보존 가드도 함께 수행한다.
 
     recall의 한계: 단어/글자 recall은 ``<hp:t>`` 텍스트 기준이라 그림
     (``<hp:pic>``) 안에 그래픽으로 박힌 텍스트는 감지하지 못한다(맹점). 이를
@@ -931,6 +1102,11 @@ def convert(
             삽입한다. None(기본)이면 이미지 추출 없이 현행 동작과 동일하다.
         image_ref_prefix: Markdown 참조와 image_map의 ``file`` 값 앞에 붙는 경로
             접두사. 예: ``"img/"`` -> ``![image](img/image1.jpg)``. 기본 빈 문자열.
+        prune_empty: True이면 전부 빈 행·열을 표에서 지운다.
+        underline: True이면 ``header.xml``에서 밑줄(``type != NONE``)이 걸린 글자 모양의
+            run을 ``<u>…</u>``로 감싸고, 공백뿐인 밑줄 run(기입용 빈칸)은 같은 길이의
+            ``\\_``로 낸다. 기본 False는 종전 출력과 같다(밑줄이 의미 없는 문서에서는
+            태그가 잡음이 되므로 옵트인).
 
     Returns:
         :class:`ConversionResult` (markdown, recall, warnings, image_count,
@@ -941,6 +1117,10 @@ def convert(
         HwpxParseError: 올바른 HWPX zip이 아니거나 section XML이 없을 때.
     """
     roots, sanitized = _read_section_roots(filepath)
+    underline_ids: "frozenset[str] | None" = None
+    header_warning = None
+    if underline:
+        underline_ids, header_warning = _read_underline_ids(filepath)
 
     image_ctx = None
     if image_dir is not None:
@@ -950,7 +1130,7 @@ def convert(
 
     markdown, gt_words, src_text = _render_roots(
         roots, cell_br=cell_br, merge_fill=merge_fill, image_ctx=image_ctx,
-        prune_empty=prune_empty,
+        prune_empty=prune_empty, underline_ids=underline_ids,
     )
     image_count = count_images(roots)
 
@@ -1001,6 +1181,13 @@ def convert(
             "표 셀 병합·중첩 구조에서 마커가 빠졌을 수 있으니 확인하세요."
         )
 
+    if header_warning:
+        warnings.append(header_warning)
+    if underline_ids:
+        ul_warning = _underline_loss(_underline_source(roots, underline_ids), markdown)
+        if ul_warning:
+            warnings.append(ul_warning)
+
     if image_count:
         if image_dir is not None:
             non_ocr = sum(
@@ -1040,6 +1227,7 @@ def to_markdown(
     image_dir: "str | None" = None,
     image_ref_prefix: str = "",
     prune_empty: bool = False,
+    underline: bool = False,
 ) -> str:
     """HWPX를 Markdown 문자열로 변환한다(가장 간단한 진입점).
 
@@ -1055,6 +1243,8 @@ def to_markdown(
             이미지 파일을 이 디렉터리에 쓰고 Markdown에 ``![image](...)`` 참조를
             삽입한다. None(기본)이면 이미지 추출 없이 현행 동작과 동일하다.
         image_ref_prefix: Markdown 참조 경로 접두사(:func:`convert` 참조).
+        underline: True이면 밑줄 구간을 ``<u>…</u>``로, 밑줄 빈칸을 ``\\_``로 낸다
+            (:func:`convert` 참조).
 
     Raises:
         HwpxEncryptedError: 파일이 암호화되어 있을 때.
@@ -1067,4 +1257,5 @@ def to_markdown(
         image_dir=image_dir,
         image_ref_prefix=image_ref_prefix,
         prune_empty=prune_empty,
+        underline=underline,
     ).markdown
