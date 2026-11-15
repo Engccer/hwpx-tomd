@@ -2,6 +2,17 @@
 
 이 프로젝트의 주요 변경 사항을 기록합니다. 형식은 [Keep a Changelog](https://keepachangelog.com/ko/1.1.0/)를 따르고, 버전은 [Semantic Versioning](https://semver.org/lang/ko/)을 따릅니다.
 
+## [0.5.0] - 2026-11-15
+
+### 추가
+- `convert(underline=True)` / `to_markdown(underline=True)` / CLI `--underline`: `Contents/header.xml` 글자 모양(charPr)의 `<hh:underline>`이 `NONE`이 아니면 그 run을 `<u>…</u>`로 감싼다. 서식 경계로 나뉜 연속 밑줄 run은 한 구간으로 감싸고(사이의 공백 한 칸은 단어 공백), 앞뒤 공백은 태그 밖에 둔다. `type`이 `NONE`이 아니면 윗줄(`TOP`)·가운데줄(`CENTER`)도 밑줄로 본다(이슈 기준). 표 셀·캡션·글상자 안 run도 같다 (#3)
+- 공백뿐인 밑줄 run(기입용 빈칸)은 공백 정규화에 지워지지 않게 공백 수만큼 `\_`로 낸다. 밑줄 문구 바로 뒤의 기입란(「성명」+공백 run)처럼 내용과 이어진 경우는 두 칸 이상일 때 빈칸으로 본다. 판정은 run 단위라 누름틀 같은 컨트롤로 한 run이 `<hp:t>` 여럿에 나뉘어도 같다. 글자와 같은 run 안에 붙은 앞뒤 공백은 빈칸으로 보지 않는다(종전처럼 정규화). 공백을 그대로 두는 방식은 쓰지 않았다. 엔진의 공백 정규화와 HTML·Markdown 렌더링이 모두 연속 공백을 하나로 접어 빈칸 길이를 잃고, 이슈가 짚었듯 빈칸 개수가 답의 단위인 문서가 있기 때문이다. `_`는 원문 텍스트와 렌더 결과 양쪽에서 보이고 길이가 남는다. GFM이 강조 문법으로 읽지 않게 이스케이프하고, 밑줄 자체가 표기라 `<u>`로 다시 감싸지 않는다
+- 밑줄 보존 가드: `underline=True`일 때 원본 밑줄 run 그룹의 내용 글자(멀티셋)와 빈칸 길이가 출력의 `<u>` 안 글자·`\_` 개수보다 많으면 경고한다. 단어·글자 recall과 마커 가드는 공백과 표기를 세지 않아 이 손실을 recall 100%로 통과시켰다
+- `header.xml`이 없으면 밑줄 없이 변환한다. 불법 제어문자는 본문처럼 지우고 다시 읽으며, 그래도 파싱할 수 없으면 본문 변환은 계속하고 경고를 남긴다
+
+### 호환
+- 기본값 `underline=False`의 출력과 경고는 0.4.1과 같다. 이 패키지 출력을 소비하는 docparse·hwpx-automation은 옵션을 켜야 바뀐다
+
 ## [0.4.1] - 2026-10-28
 
 0.3.0~0.4.0은 PyPI에 따로 배포되지 않았고, 그 변경은 모두 이 버전에 들어 있다.
@@ -79,6 +90,7 @@
 - 이미지 포함 문서에 대한 경고 출력
 - 라이브러리 API(`to_markdown`, `convert`)와 CLI(`hwpx-tomd`)
 
+[0.5.0]: https://github.com/Engccer/hwpx-tomd/compare/v0.4.1...v0.5.0
 [0.4.1]: https://github.com/Engccer/hwpx-tomd/compare/v0.2.2...v0.4.1
 [0.2.2]: https://github.com/Engccer/hwpx-tomd/compare/v0.2.1...v0.2.2
 [0.2.1]: https://github.com/Engccer/hwpx-tomd/compare/v0.2.0...v0.2.1
